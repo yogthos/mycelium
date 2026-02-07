@@ -1,0 +1,63 @@
+{:id :user-onboarding
+ :doc "Handles user authentication and profile retrieval"
+
+ :cells
+ {:start
+  {:id       :auth/parse-request
+   :doc      "Extract and validate credentials from the HTTP request"
+   :schema   {:input  [:map
+                        [:http-request [:map
+                          [:headers map?]
+                          [:body map?]]]]
+              :output [:map
+                        [:user-id :string]
+                        [:auth-token :string]]}
+   :requires []
+   :transitions #{:success :failure}}
+
+  :validate-session
+  {:id       :auth/validate-session
+   :doc      "Check credentials against the session store"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:auth-token :string]]
+              :output [:map
+                        [:session-valid :boolean]]}
+   :requires [:db]
+   :transitions #{:authorized :unauthorized}}
+
+  :fetch-profile
+  {:id       :user/fetch-profile
+   :doc      "Fetch user profile from database"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:session-valid :boolean]]
+              :output [:map
+                        [:profile [:map
+                          [:name :string]
+                          [:email :string]]]]}
+   :requires [:db]
+   :transitions #{:found :not-found}}
+
+  :render-home
+  {:id       :ui/render-home
+   :doc      "Render the home page response"
+   :schema   {:input  [:map
+                        [:profile [:map
+                          [:name :string]
+                          [:email :string]]]]
+              :output [:map
+                        [:http-response [:map
+                          [:status :int]
+                          [:body :string]]]]}
+   :requires []
+   :transitions #{:done}}}
+
+ :edges
+ {:start            {:success :validate-session
+                     :failure :error}
+  :validate-session {:authorized   :fetch-profile
+                     :unauthorized :error}
+  :fetch-profile    {:found     :render-home
+                     :not-found :error}
+  :render-home      {:done :end}}}
