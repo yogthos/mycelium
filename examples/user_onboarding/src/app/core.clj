@@ -8,9 +8,8 @@
             [app.routes :as routes]))
 
 (defn read-config []
-  (-> (io/resource "system.edn")
-      slurp
-      (edn/read-string {:readers {'ig/ref ig/ref}})))
+  (let [content (slurp (io/resource "system.edn"))]
+    (edn/read-string {:readers {'ig/ref ig/ref}} content)))
 
 ;; --- Integrant components ---
 

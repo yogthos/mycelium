@@ -4,6 +4,7 @@
          ring/ring-core                    {:mvn/version "1.12.2"}
          ring/ring-jetty-adapter           {:mvn/version "1.12.2"}
          metosin/reitit-ring               {:mvn/version "0.7.2"}
+         metosin/reitit-middleware         {:mvn/version "0.7.2"}
          metosin/muuntaja                  {:mvn/version "0.6.10"}
          ;; System lifecycle
          integrant/integrant               {:mvn/version "0.13.1"}
