@@ -1,0 +1,22 @@
+{% extends "templates/base.html" %}
+{% block title %}Users — Mycelium App{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>All Users</h1>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Name</th><th>Email</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for user in users %}
+      <tr>
+        <td>{{user.id}}</td>
+        <td>{{user.name}}</td>
+        <td>{{user.email}}</td>
+        <td><a class="btn" href="/users/{{user.id}}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

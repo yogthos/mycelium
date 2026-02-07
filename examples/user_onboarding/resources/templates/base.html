@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Mycelium App{% endblock %}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #1a1a1a; background: #f5f5f5; }
+    nav { background: #2d3748; padding: 0.75rem 1.5rem; display: flex; align-items: center; gap: 1.5rem; }
+    nav a { color: #e2e8f0; text-decoration: none; font-size: 0.9rem; }
+    nav a:hover { color: #fff; }
+    nav .brand { font-weight: 700; font-size: 1.1rem; color: #81e6d9; }
+    .container { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #e2e8f0; }
+    th { font-weight: 600; color: #4a5568; font-size: 0.85rem; text-transform: uppercase; }
+    a.btn { display: inline-block; padding: 0.5rem 1rem; background: #2d3748; color: #fff; border-radius: 4px; text-decoration: none; font-size: 0.9rem; }
+    a.btn:hover { background: #4a5568; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 1rem; margin-bottom: 0.75rem; }
+    button[type="submit"] { padding: 0.5rem 1.5rem; background: #2d3748; color: #fff; border: none; border-radius: 4px; font-size: 1rem; cursor: pointer; }
+    button[type="submit"]:hover { background: #4a5568; }
+    label { display: block; font-weight: 600; margin-bottom: 0.25rem; color: #4a5568; }
+    .error-code { font-size: 3rem; font-weight: 700; color: #e53e3e; }
+    .dl dt { font-weight: 600; color: #4a5568; }
+    .dl dd { margin-bottom: 0.75rem; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a class="brand" href="/dashboard">Mycelium</a>
+    <a href="/login">Login</a>
+    <a href="/users">Users</a>
+  </nav>
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

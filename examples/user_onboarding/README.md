@@ -1,8 +1,10 @@
 # User Onboarding Example
 
-A complete web application demonstrating Mycelium's manifest-driven workflow orchestration. The app authenticates a user, fetches their profile from a database, and renders a welcome response — all defined as composable cells wired together by an EDN manifest.
+A complete web application demonstrating Mycelium's manifest-driven workflow orchestration. The app authenticates a user, fetches their profile from a database, and renders responses — all defined as composable cells wired together by EDN manifests. Includes both a JSON API and a full HTML frontend powered by Selmer templates.
 
-## Workflow
+## Workflows
+
+### JSON API — User Onboarding
 
 ```mermaid
 graph LR
@@ -15,7 +17,53 @@ graph LR
     render -->|done| stop((end))
 ```
 
-Each box is a **cell** — an isolated unit with a defined handler, input/output schema, and declared transitions. The manifest (`resources/workflows/user-onboarding.edn`) is the single source of truth for schemas and wiring.
+### HTML — Login Submit
+
+```mermaid
+graph LR
+    start[parse-request] -->|success| validate[validate-session]
+    start -->|failure| err[render-error]
+    validate -->|authorized| fetch[fetch-profile]
+    validate -->|unauthorized| err
+    fetch -->|found| dash[render-dashboard]
+    fetch -->|not-found| err
+    dash -->|done| stop((end))
+    err -->|done| stop
+```
+
+### HTML — Dashboard
+
+```mermaid
+graph LR
+    start[extract-session] -->|success| validate[validate-session]
+    start -->|failure| err[render-error]
+    validate -->|authorized| fetch[fetch-profile]
+    validate -->|unauthorized| err
+    fetch -->|found| dash[render-dashboard]
+    fetch -->|not-found| err
+    dash -->|done| stop((end))
+    err -->|done| stop
+```
+
+### HTML — User List
+
+```mermaid
+graph LR
+    start[fetch-all-users] -->|done| render[render-user-list]
+    render -->|done| stop((end))
+```
+
+### HTML — User Profile
+
+```mermaid
+graph LR
+    start[fetch-profile-by-id] -->|found| render[render-user-profile]
+    start -->|not-found| err[render-error]
+    render -->|done| stop((end))
+    err -->|done| stop
+```
+
+Each box is a **cell** — an isolated unit with a defined handler, input/output schema, and declared transitions. The manifests (`resources/workflows/*.edn`) are the single source of truth for schemas and wiring.
 
 ## Project Structure
 
@@ -25,8 +73,20 @@ user_onboarding/
 ├── tests.edn                                 # Kaocha test config
 ├── resources/
 │   ├── system.edn                            # Integrant system config
+│   ├── templates/                            # Selmer HTML templates
+│   │   ├── base.html                         # Base layout with nav + CSS
+│   │   ├── login.html                        # Login form
+│   │   ├── dashboard.html                    # Dashboard page
+│   │   ├── error.html                        # Error page (401/404/etc)
+│   │   ├── users.html                        # User list table
+│   │   └── profile.html                      # Single user profile
 │   ├── workflows/
-│   │   └── user-onboarding.edn               # Workflow manifest (schemas + edges)
+│   │   ├── user-onboarding.edn               # JSON API workflow
+│   │   ├── login-page.edn                    # Login form page
+│   │   ├── login-submit.edn                  # Login form submission
+│   │   ├── dashboard.edn                     # Dashboard (token-based)
+│   │   ├── user-list.edn                     # All users list
+│   │   └── user-profile.edn                  # Single user profile
 │   └── migrations/
 │       ├── 20240101000000-initial-schema.up.sql
 │       └── 20240101000000-initial-schema.down.sql
@@ -35,26 +95,41 @@ user_onboarding/
 │   ├── routes.clj                            # Ring/Reitit HTTP routes
 │   ├── db.clj                                # Database queries
 │   ├── workflows/
-│   │   └── onboarding.clj                    # Loads manifest, runs workflow
+│   │   ├── onboarding.clj                    # JSON API workflow loader
+│   │   ├── login.clj                         # Login page + submit loaders
+│   │   ├── dashboard.clj                     # Dashboard workflow loader
+│   │   └── users.clj                         # User list/profile loaders
 │   └── cells/
-│       ├── auth.clj                          # :auth/parse-request, :auth/validate-session
-│       ├── user.clj                          # :user/fetch-profile
-│       └── ui.clj                            # :ui/render-home
+│       ├── auth.clj                          # :auth/parse-request, :auth/validate-session, :auth/extract-session
+│       ├── user.clj                          # :user/fetch-profile, :user/fetch-all-users, :user/fetch-profile-by-id
+│       └── ui.clj                            # :ui/render-home, :ui/render-login-page, :ui/render-dashboard, :ui/render-error, :ui/render-user-list, :ui/render-user-profile
 └── test/app/
     ├── cells/
     │   ├── auth_test.clj                     # Unit tests for auth cells
-    │   ├── user_test.clj                     # Unit tests for user cell
-    │   └── ui_test.clj                       # Unit tests for UI cell
+    │   ├── user_test.clj                     # Unit tests for user cells
+    │   └── ui_test.clj                       # Unit tests for UI cells
     └── integration_test.clj                  # End-to-end workflow tests
 ```
 
 ## How It Works
 
 1. **Cells** (`src/app/cells/`) define handlers and transitions via `defcell` — no schemas here.
-2. **Manifest** (`resources/workflows/user-onboarding.edn`) declares schemas, edges, and wiring for each cell.
-3. **Workflow loader** (`src/app/workflows/onboarding.clj`) loads the manifest and calls `manifest->workflow`, which attaches schemas to registered cells and produces a compilable workflow definition.
-4. **Routes** (`src/app/routes.clj`) bridge HTTP requests into the workflow via `run-onboarding`.
+2. **Manifests** (`resources/workflows/*.edn`) declare schemas, edges, and wiring for each cell.
+3. **Workflow loaders** (`src/app/workflows/`) load manifests and call `manifest->workflow`, which attaches schemas to registered cells and produces compilable workflow definitions.
+4. **Routes** (`src/app/routes.clj`) bridge HTTP requests into workflows. JSON API routes use Muuntaja for content negotiation. HTML routes use a generic `html-handler` that maps workflow results to Ring responses.
 5. **Integrant** (`src/app/core.clj`) manages the system lifecycle: database, migrations, handler, and Jetty server.
+
+## Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/health` | Health check (JSON) |
+| POST | `/api/onboarding` | JSON API workflow |
+| GET | `/login` | Login form page |
+| POST | `/login` | Submit login, render dashboard or error |
+| GET | `/dashboard?token=...` | Dashboard (requires session token) |
+| GET | `/users` | User list page |
+| GET | `/users/:id` | User profile page |
 
 ## Running
 
@@ -67,13 +142,19 @@ clj -M:run
 Test with curl:
 
 ```bash
-# Successful authentication + profile fetch
+# JSON API — successful authentication + profile fetch
 curl -X POST http://localhost:3000/api/onboarding \
   -H "Content-Type: application/json" \
   -d '{"username": "alice", "token": "tok_abc123"}'
 
 # Health check
 curl http://localhost:3000/api/health
+
+# HTML pages
+open http://localhost:3000/login
+open http://localhost:3000/dashboard?token=tok_abc123
+open http://localhost:3000/users
+open http://localhost:3000/users/alice
 ```
 
 ## Testing

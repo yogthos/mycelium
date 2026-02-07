@@ -26,7 +26,11 @@
   (when-not (cell/get-cell :user/fetch-profile)
     (require 'app.cells.user :reload))
   (when-not (cell/get-cell :ui/render-home)
-    (require 'app.cells.ui :reload)))
+    (require 'app.cells.ui :reload))
+  (when-not (cell/get-cell :auth/extract-session)
+    (require 'app.cells.auth :reload))
+  (when-not (cell/get-cell :user/fetch-all-users)
+    (require 'app.cells.user :reload)))
 
 (use-fixtures :each (fn [f]
                       (ensure-cells-loaded!)

@@ -16,8 +16,10 @@
              :auth-token token
              :mycelium/transition :success)
       (assoc data
-             :user-id    ""
-             :auth-token ""
+             :user-id       ""
+             :auth-token    ""
+             :error-type    :bad-request
+             :error-message "Missing username or token"
              :mycelium/transition :failure))))
 
 (cell/defcell :auth/validate-session
@@ -27,6 +29,28 @@
   [{:keys [db]} data]
   (let [session (db/get-session db (:auth-token data))
         valid?  (and session (= 1 (:valid session)))]
-    (assoc data
-           :session-valid (boolean valid?)
-           :mycelium/transition (if valid? :authorized :unauthorized))))
+    (if valid?
+      (assoc data
+             :user-id    (:user_id session)
+             :session-valid true
+             :mycelium/transition :authorized)
+      (assoc data
+             :session-valid  false
+             :error-type     :unauthorized
+             :error-message  "Invalid or expired session token"
+             :mycelium/transition :unauthorized))))
+
+(cell/defcell :auth/extract-session
+  {:doc         "Extract auth token from query parameters"
+   :transitions #{:success :failure}}
+  [_resources data]
+  (let [token (get-in data [:http-request :query-params :token])]
+    (if token
+      (assoc data
+             :auth-token token
+             :mycelium/transition :success)
+      (assoc data
+             :auth-token    ""
+             :error-type    :unauthorized
+             :error-message "No session token provided"
+             :mycelium/transition :failure))))

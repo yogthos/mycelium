@@ -1,0 +1,14 @@
+{% extends "templates/base.html" %}
+{% block title %}Login — Mycelium App{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Login</h1>
+  <form method="POST" action="/login">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" placeholder="alice" required>
+    <label for="token">Token</label>
+    <input type="text" id="token" name="token" placeholder="tok_abc123" required>
+    <button type="submit">Sign In</button>
+  </form>
+</div>
+{% endblock %}

@@ -9,8 +9,10 @@
 (use-fixtures :each (fn [f]
                       (when-not (cell/get-cell :auth/parse-request)
                         (require 'app.cells.auth :reload))
-                      ;; Load manifest to attach schemas
+                      ;; Load manifests to attach schemas
                       (require 'app.workflows.onboarding :reload)
+                      (require 'app.workflows.login :reload)
+                      (require 'app.workflows.dashboard :reload)
                       (f)))
 
 (deftest parse-request-success-test
@@ -36,15 +38,17 @@
       (is (= "tok_bob456" (get-in result [:output :auth-token]))))))
 
 (deftest parse-request-failure-test
-  (testing "parse-request fails with missing credentials"
+  (testing "parse-request fails with missing credentials and sets error context"
     (let [result (dev/test-cell :auth/parse-request
                   {:input {:http-request {:headers {}
                                           :body    {}}}
                    :resources {}})]
-      (is (= :failure (get-in result [:output :mycelium/transition]))))))
+      (is (= :failure (get-in result [:output :mycelium/transition])))
+      (is (= :bad-request (get-in result [:output :error-type])))
+      (is (string? (get-in result [:output :error-message]))))))
 
 (deftest validate-session-authorized-test
-  (testing "validate-session authorizes valid token"
+  (testing "validate-session authorizes valid token and sets user-id"
     (with-redefs [db/get-session (fn [_ds token]
                                    (when (= token "tok_abc123")
                                      {:user_id "alice" :valid 1}))]
@@ -52,16 +56,19 @@
                     {:input {:user-id "alice" :auth-token "tok_abc123"}
                      :resources {:db :mock-ds}})]
         (is (:pass? result))
-        (is (true? (get-in result [:output :session-valid])))))))
+        (is (true? (get-in result [:output :session-valid])))
+        (is (= "alice" (get-in result [:output :user-id])))))))
 
 (deftest validate-session-unauthorized-test
-  (testing "validate-session rejects invalid token"
+  (testing "validate-session rejects invalid token with error context"
     (with-redefs [db/get-session (fn [_ds _token] nil)]
       (let [result (dev/test-cell :auth/validate-session
                     {:input {:user-id "alice" :auth-token "bad_token"}
                      :resources {:db :mock-ds}})]
         (is (:pass? result))
-        (is (false? (get-in result [:output :session-valid])))))))
+        (is (false? (get-in result [:output :session-valid])))
+        (is (= :unauthorized (get-in result [:output :error-type])))
+        (is (string? (get-in result [:output :error-message])))))))
 
 (deftest validate-session-expired-test
   (testing "validate-session rejects expired token"
@@ -72,3 +79,20 @@
                      :resources {:db :mock-ds}})]
         (is (:pass? result))
         (is (false? (get-in result [:output :session-valid])))))))
+
+(deftest extract-session-success-test
+  (testing "extract-session reads token from query params"
+    (let [result (dev/test-cell :auth/extract-session
+                  {:input {:http-request {:query-params {:token "tok_abc123"}}}
+                   :resources {}})]
+      (is (:pass? result))
+      (is (= "tok_abc123" (get-in result [:output :auth-token])))
+      (is (= :success (get-in result [:output :mycelium/transition]))))))
+
+(deftest extract-session-failure-test
+  (testing "extract-session fails when no token in query params"
+    (let [result (dev/test-cell :auth/extract-session
+                  {:input {:http-request {:query-params {}}}
+                   :resources {}})]
+      (is (= :failure (get-in result [:output :mycelium/transition])))
+      (is (= :unauthorized (get-in result [:output :error-type]))))))

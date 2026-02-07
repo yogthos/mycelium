@@ -1,0 +1,47 @@
+{:id :user-profile
+ :doc "Fetch a single user by ID and render their profile page"
+
+ :cells
+ {:start
+  {:id       :user/fetch-profile-by-id
+   :doc      "Extract user-id from path params and fetch profile"
+   :schema   {:input  [:map
+                        [:http-request [:map
+                          [:path-params [:map
+                            [:id :string]]]]]]
+              :output [:map
+                        [:profile [:map
+                          [:id :string]
+                          [:name :string]
+                          [:email :string]]]]}
+   :requires [:db]
+   :transitions #{:found :not-found}}
+
+  :render-profile
+  {:id       :ui/render-user-profile
+   :doc      "Render a single user profile page"
+   :schema   {:input  [:map
+                        [:profile [:map
+                          [:id :string]
+                          [:name :string]
+                          [:email :string]]]]
+              :output [:map
+                        [:html :string]]}
+   :requires []
+   :transitions #{:done}}
+
+  :render-error
+  {:id       :ui/render-error
+   :doc      "Render a styled error page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]
+                        [:error-status :int]]}
+   :requires []
+   :transitions #{:done}}}
+
+ :edges
+ {:start          {:found     :render-profile
+                   :not-found :render-error}
+  :render-profile {:done :end}
+  :render-error   {:done :end}}}

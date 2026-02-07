@@ -1,0 +1,15 @@
+{:id :login-page
+ :doc "Renders the login form"
+
+ :cells
+ {:start
+  {:id       :ui/render-login-page
+   :doc      "Render the login form page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]]}
+   :requires []
+   :transitions #{:done}}}
+
+ :edges
+ {:start {:done :end}}}

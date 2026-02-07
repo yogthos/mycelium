@@ -1,0 +1,72 @@
+{:id :login-submit
+ :doc "Handles login form submission: authenticate and render dashboard or error"
+
+ :cells
+ {:start
+  {:id       :auth/parse-request
+   :doc      "Extract credentials from the login form POST body"
+   :schema   {:input  [:map
+                        [:http-request [:map
+                          [:headers map?]
+                          [:body map?]]]]
+              :output [:map
+                        [:user-id :string]
+                        [:auth-token :string]]}
+   :requires []
+   :transitions #{:success :failure}}
+
+  :validate-session
+  {:id       :auth/validate-session
+   :doc      "Check credentials against the session store"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:auth-token :string]]
+              :output [:map
+                        [:session-valid :boolean]]}
+   :requires [:db]
+   :transitions #{:authorized :unauthorized}}
+
+  :fetch-profile
+  {:id       :user/fetch-profile
+   :doc      "Fetch user profile from database"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:session-valid :boolean]]
+              :output [:map
+                        [:profile [:map
+                          [:name :string]
+                          [:email :string]]]]}
+   :requires [:db]
+   :transitions #{:found :not-found}}
+
+  :render-dashboard
+  {:id       :ui/render-dashboard
+   :doc      "Render the dashboard page with user profile"
+   :schema   {:input  [:map
+                        [:profile [:map
+                          [:name :string]
+                          [:email :string]]]]
+              :output [:map
+                        [:html :string]]}
+   :requires []
+   :transitions #{:done}}
+
+  :render-error
+  {:id       :ui/render-error
+   :doc      "Render a styled error page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]
+                        [:error-status :int]]}
+   :requires []
+   :transitions #{:done}}}
+
+ :edges
+ {:start            {:success :validate-session
+                     :failure :render-error}
+  :validate-session {:authorized   :fetch-profile
+                     :unauthorized :render-error}
+  :fetch-profile    {:found     :render-dashboard
+                     :not-found :render-error}
+  :render-dashboard {:done :end}
+  :render-error     {:done :end}}}

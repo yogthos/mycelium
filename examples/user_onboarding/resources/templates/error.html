@@ -1,0 +1,10 @@
+{% extends "templates/base.html" %}
+{% block title %}Error {{status}} — Mycelium App{% endblock %}
+{% block content %}
+<div class="card" style="text-align:center;">
+  <div class="error-code">{{status}}</div>
+  <h1>{{title}}</h1>
+  <p style="color:#718096; margin:1rem 0;">{{message}}</p>
+  <a class="btn" href="/login">Back to Login</a>
+</div>
+{% endblock %}

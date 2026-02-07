@@ -1,0 +1,14 @@
+{% extends "templates/base.html" %}
+{% block title %}{{name}} — Mycelium App{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{name}}</h1>
+  <dl class="dl">
+    <dt>User ID</dt>
+    <dd>{{id}}</dd>
+    <dt>Email</dt>
+    <dd>{{email}}</dd>
+  </dl>
+  <a class="btn" href="/users">Back to Users</a>
+</div>
+{% endblock %}
