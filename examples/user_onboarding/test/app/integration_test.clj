@@ -30,7 +30,9 @@
   (when-not (cell/get-cell :auth/extract-session)
     (require 'app.cells.auth :reload))
   (when-not (cell/get-cell :user/fetch-all-users)
-    (require 'app.cells.user :reload)))
+    (require 'app.cells.user :reload))
+  (when-not (cell/get-cell :auth/extract-cookie-session)
+    (require 'app.cells.auth :reload)))
 
 (use-fixtures :each (fn [f]
                       (ensure-cells-loaded!)

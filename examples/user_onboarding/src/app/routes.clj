@@ -3,7 +3,9 @@
             [muuntaja.core :as m]
             [reitit.ring.middleware.muuntaja :as muuntaja]
             [ring.middleware.params :as params]
+            [ring.middleware.cookies :as cookies]
             [app.workflows.onboarding :as onboarding]
+            [app.workflows.home :as home]
             [app.workflows.login :as login]
             [app.workflows.dashboard :as dashboard]
             [app.workflows.users :as users]))
@@ -40,6 +42,23 @@
          :headers {"Content-Type" "text/html; charset=utf-8"}
          :body    "<h1>500 Internal Server Error</h1>"}))))
 
+(defn- login-submit-handler
+  "Handles login form submission. Sets session-token cookie on success."
+  [db]
+  (fn [request]
+    (try
+      (let [result   (login/run-login-submit db request)
+            response (html-response result)]
+        (if (:auth-token result)
+          (assoc response :cookies {"session-token" {:value     (:auth-token result)
+                                                     :path      "/"
+                                                     :http-only true}})
+          response))
+      (catch Exception _e
+        {:status  500
+         :headers {"Content-Type" "text/html; charset=utf-8"}
+         :body    "<h1>500 Internal Server Error</h1>"}))))
+
 (defn app [db]
   (ring/ring-handler
    (ring/router
@@ -50,12 +69,14 @@
       ["/onboarding" {:post {:handler (onboarding-handler db)}}]]
 
      ;; HTML routes — no Muuntaja, raw Ring responses
+     ["/" {:get {:handler (html-handler
+                            (fn [request]
+                              (home/run-home db request)))}}]
+
      ["/login" {:get  {:handler (html-handler
                                  (fn [_request]
                                    (login/run-login-page)))}
-                :post {:handler (html-handler
-                                 (fn [request]
-                                   (login/run-login-submit db request)))}}]
+                :post {:handler (login-submit-handler db)}}]
 
      ["/dashboard" {:get {:handler (html-handler
                                     (fn [request]
@@ -69,4 +90,4 @@
                                     (fn [request]
                                       (users/run-user-profile db request)))}}]])
    (ring/create-default-handler)
-   {:middleware [params/wrap-params]}))
+   {:middleware [params/wrap-params cookies/wrap-cookies]}))

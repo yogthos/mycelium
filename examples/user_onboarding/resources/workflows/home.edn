@@ -1,16 +1,14 @@
-{:id :user-onboarding
- :doc "Handles user authentication and profile retrieval"
+{:id :home
+ :doc "Home page: check cookie session, show dashboard if logged in or login form if not"
 
  :cells
  {:start
-  {:id       :auth/parse-request
-   :doc      "Extract and validate credentials from the HTTP request"
+  {:id       :auth/extract-cookie-session
+   :doc      "Extract auth token from session-token cookie"
    :schema   {:input  [:map
                         [:http-request [:map
-                          [:headers map?]
-                          [:body map?]]]]
+                          [:cookies map?]]]]
               :output [:map
-                        [:user-id :string]
                         [:auth-token :string]]}
    :requires []
    :transitions #{:success :failure}}
@@ -19,7 +17,6 @@
   {:id       :auth/validate-session
    :doc      "Check credentials against the session store"
    :schema   {:input  [:map
-                        [:user-id :string]
                         [:auth-token :string]]
               :output [:map
                         [:session-valid :boolean]]}
@@ -39,25 +36,33 @@
    :requires [:db]
    :transitions #{:found :not-found}}
 
-  :render-home
-  {:id       :ui/render-home
-   :doc      "Render the home page response"
+  :render-dashboard
+  {:id       :ui/render-dashboard
+   :doc      "Render the dashboard page with user profile"
    :schema   {:input  [:map
                         [:profile [:map
                           [:name :string]
                           [:email :string]]]]
               :output [:map
-                        [:http-response [:map
-                          [:status :int]
-                          [:body map?]]]]}
+                        [:html :string]]}
+   :requires []
+   :transitions #{:done}}
+
+  :render-login
+  {:id       :ui/render-login-page
+   :doc      "Render the login form page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]]}
    :requires []
    :transitions #{:done}}}
 
  :edges
  {:start            {:success :validate-session
-                     :failure :error}
+                     :failure :render-login}
   :validate-session {:authorized   :fetch-profile
-                     :unauthorized :error}
-  :fetch-profile    {:found     :render-home
-                     :not-found :error}
-  :render-home      {:done :end}}}
+                     :unauthorized :render-login}
+  :fetch-profile    {:found     :render-dashboard
+                     :not-found :render-login}
+  :render-dashboard {:done :end}
+  :render-login     {:done :end}}}

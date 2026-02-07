@@ -11,6 +11,7 @@
                       (require 'app.workflows.login :reload)
                       (require 'app.workflows.dashboard :reload)
                       (require 'app.workflows.users :reload)
+                      (require 'app.workflows.home :reload)
                       (f)))
 
 (deftest render-home-test

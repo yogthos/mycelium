@@ -54,3 +54,16 @@
              :error-type    :unauthorized
              :error-message "No session token provided"
              :mycelium/transition :failure))))
+
+(cell/defcell :auth/extract-cookie-session
+  {:doc         "Extract auth token from session-token cookie"
+   :transitions #{:success :failure}}
+  [_resources data]
+  (let [token (get-in data [:http-request :cookies "session-token" :value])]
+    (if token
+      (assoc data
+             :auth-token token
+             :mycelium/transition :success)
+      (assoc data
+             :auth-token ""
+             :mycelium/transition :failure))))

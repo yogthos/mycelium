@@ -13,6 +13,7 @@
                       (require 'app.workflows.onboarding :reload)
                       (require 'app.workflows.login :reload)
                       (require 'app.workflows.dashboard :reload)
+                      (require 'app.workflows.home :reload)
                       (f)))
 
 (deftest parse-request-success-test
@@ -96,3 +97,19 @@
                    :resources {}})]
       (is (= :failure (get-in result [:output :mycelium/transition])))
       (is (= :unauthorized (get-in result [:output :error-type]))))))
+
+(deftest extract-cookie-session-success-test
+  (testing "extract-cookie-session reads token from cookie"
+    (let [result (dev/test-cell :auth/extract-cookie-session
+                  {:input {:http-request {:cookies {"session-token" {:value "tok_abc123"}}}}
+                   :resources {}})]
+      (is (:pass? result))
+      (is (= "tok_abc123" (get-in result [:output :auth-token])))
+      (is (= :success (get-in result [:output :mycelium/transition]))))))
+
+(deftest extract-cookie-session-failure-test
+  (testing "extract-cookie-session fails when no session cookie"
+    (let [result (dev/test-cell :auth/extract-cookie-session
+                  {:input {:http-request {:cookies {}}}
+                   :resources {}})]
+      (is (= :failure (get-in result [:output :mycelium/transition]))))))
