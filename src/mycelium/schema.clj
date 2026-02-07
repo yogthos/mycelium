@@ -11,10 +11,10 @@
 
 (defn validate-input
   "Validates data against the cell's input schema.
-   Returns nil if valid, or an error map if invalid.
+   Returns nil if valid (or if no input schema is defined), or an error map if invalid.
    Uses open-map semantics (extra keys pass through)."
   [cell data]
-  (let [schema (get-in cell [:schema :input])]
+  (when-let [schema (get-in cell [:schema :input])]
     (when-let [explanation (m/explain schema data)]
       {:cell-id (:id cell)
        :phase   :input
@@ -23,7 +23,8 @@
 
 (defn validate-output
   "Validates data against the cell's output schema and transition.
-   Returns nil if valid, or an error map if invalid."
+   Returns nil if valid (or if no output schema is defined), or an error map if invalid.
+   Transition validation is always performed regardless of schema presence."
   [cell data]
   (let [schema      (get-in cell [:schema :output])
         transition  (:mycelium/transition data)
@@ -43,11 +44,12 @@
        :data    data}
 
       :else
-      (when-let [explanation (m/explain schema data)]
-        {:cell-id (:id cell)
-         :phase   :output
-         :errors  (me/humanize explanation)
-         :data    data}))))
+      (when schema
+        (when-let [explanation (m/explain schema data)]
+          {:cell-id (:id cell)
+           :phase   :output
+           :errors  (me/humanize explanation)
+           :data    data})))))
 
 (defn make-pre-interceptor
   "Creates a Maestro pre-interceptor that validates input schemas.

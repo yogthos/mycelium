@@ -10,7 +10,8 @@
 ;; --- Cell registry ---
 
 (defmacro defcell
-  "Registers a cell and defines its handler.
+  "Registers a cell and defines its handler (without schema).
+   Schema is provided by the manifest via `set-cell-schema!`.
    See mycelium.cell/defcell."
   [id opts bindings & body]
   `(cell/defcell ~id ~opts ~bindings ~@body))

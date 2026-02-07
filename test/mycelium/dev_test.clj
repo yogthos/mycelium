@@ -10,11 +10,12 @@
 (deftest test-cell-passes-valid-test
   (testing "test-cell passes with valid handler → {:pass? true}"
     (cell/defcell :dev/good-cell
-      {:schema {:input [:map [:x :int]]
-                :output [:map [:y :int]]}
-       :transitions #{:ok}}
+      {:transitions #{:ok}}
       [_ data]
       (assoc data :y (* 2 (:x data)) :mycelium/transition :ok))
+    (cell/set-cell-schema! :dev/good-cell
+                           {:input [:map [:x :int]]
+                            :output [:map [:y :int]]})
 
     (let [result (dev/test-cell :dev/good-cell
                                 {:input {:x 5}
@@ -28,12 +29,13 @@
 (deftest test-cell-reports-failure-test
   (testing "test-cell reports failure with bad output → {:pass? false :errors [...]}"
     (cell/defcell :dev/bad-cell
-      {:schema {:input [:map [:x :int]]
-                :output [:map [:y :string]]}
-       :transitions #{:ok}}
+      {:transitions #{:ok}}
       [_ data]
       ;; Returns :y as int instead of string
       (assoc data :y 42 :mycelium/transition :ok))
+    (cell/set-cell-schema! :dev/bad-cell
+                           {:input [:map [:x :int]]
+                            :output [:map [:y :string]]})
 
     (let [result (dev/test-cell :dev/bad-cell
                                 {:input {:x 5}

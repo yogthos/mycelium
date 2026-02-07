@@ -22,6 +22,8 @@
    Cell spec shape:
      {:id :ns/name, :handler fn, :schema {:input malli :output malli},
       :transitions #{:kw ...}, :requires [:resource ...], :async? bool, :doc \"\"}
+   Schema is optional at registration time — the manifest is the single source of truth
+   for schemas and will attach them via `set-cell-schema!`.
    Options:
      :replace? - if true, allows overwriting an existing cell (default false)"
   ([spec] (register-cell! spec {}))
@@ -30,17 +32,14 @@
      (throw (ex-info "Cell spec missing :id" {:spec spec})))
    (when-not handler
      (throw (ex-info "Cell spec missing :handler" {:id id})))
-   (when-not schema
-     (throw (ex-info "Cell spec missing :schema" {:id id})))
-   (when-not (:input schema)
-     (throw (ex-info "Cell spec missing :schema :input" {:id id})))
-   (when-not (:output schema)
-     (throw (ex-info "Cell spec missing :schema :output" {:id id})))
    (when (or (nil? transitions) (empty? transitions))
      (throw (ex-info (str "Cell " id " must declare non-empty transitions")
                      {:id id})))
-   (validate-schema! (:input schema) (str id " :input"))
-   (validate-schema! (:output schema) (str id " :output"))
+   (when schema
+     (when (:input schema)
+       (validate-schema! (:input schema) (str id " :input")))
+     (when (:output schema)
+       (validate-schema! (:output schema) (str id " :output"))))
    (swap! registry
           (fn [reg]
             (when (and (not replace?) (get reg id))
@@ -61,6 +60,21 @@
       (throw (ex-info (str "Cell " id " not found in registry")
                       {:id id}))))
 
+(defn set-cell-schema!
+  "Sets or overwrites the schema for an already-registered cell.
+   Validates that the schema is well-formed Malli before updating.
+   Throws if the cell is not found or the schema is invalid."
+  [cell-id schema]
+  (when-not (get @registry cell-id)
+    (throw (ex-info (str "Cell " cell-id " not found in registry")
+                    {:id cell-id})))
+  (when (:input schema)
+    (validate-schema! (:input schema) (str cell-id " :input")))
+  (when (:output schema)
+    (validate-schema! (:output schema) (str cell-id " :output")))
+  (swap! registry assoc-in [cell-id :schema] schema)
+  schema)
+
 (defn list-cells
   "Returns a seq of all registered cell IDs."
   []
@@ -70,10 +84,11 @@
   "Registers a cell and defines its handler.
    Usage:
      (defcell :ns/name
-       {:doc \"...\" :schema {:input [...] :output [...]} :transitions #{...}}
+       {:doc \"...\" :transitions #{...}}
        [resources data]
        body...)
 
+   Schema is provided by the manifest via `set-cell-schema!`, not in defcell.
    For async cells, add :async? true to opts and use [resources data callback error-callback]."
   [id opts bindings & body]
   `(let [handler# (fn ~bindings ~@body)]

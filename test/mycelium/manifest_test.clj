@@ -72,3 +72,22 @@
       ;; All cell IDs should be in the registry after manifest->workflow
       (is (some? (cell/get-cell :test/parse)))
       (is (some? (cell/get-cell :test/process))))))
+
+;; ===== 6. manifest->workflow applies schema to pre-registered cells =====
+
+(deftest manifest-applies-schema-to-existing-cells-test
+  (testing "manifest->workflow applies manifest schema to pre-registered cells"
+    ;; Register a cell without schema
+    (cell/register-cell!
+     {:id          :test/parse
+      :handler     (fn [_ data] (assoc data :y 1 :mycelium/transition :success))
+      :transitions #{:success :failure}})
+    (is (nil? (:schema (cell/get-cell :test/parse))))
+
+    ;; Now load the manifest — should apply schema from manifest
+    (manifest/manifest->workflow valid-manifest)
+
+    (let [cell (cell/get-cell :test/parse)]
+      (is (some? (:schema cell)))
+      (is (= [:map [:x :int]] (get-in cell [:schema :input])))
+      (is (= [:map [:y :int]] (get-in cell [:schema :output]))))))

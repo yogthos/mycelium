@@ -7,6 +7,8 @@
 (use-fixtures :each (fn [f]
                       (when-not (cell/get-cell :user/fetch-profile)
                         (require 'app.cells.user :reload))
+                      ;; Load manifest to attach schemas
+                      (require 'app.workflows.onboarding :reload)
                       (f)))
 
 (deftest fetch-profile-found-test

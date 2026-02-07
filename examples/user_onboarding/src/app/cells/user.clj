@@ -4,13 +4,6 @@
 
 (cell/defcell :user/fetch-profile
   {:doc         "Fetch user profile from database"
-   :schema      {:input  [:map
-                           [:user-id :string]
-                           [:session-valid :boolean]]
-                 :output [:map
-                           [:profile [:map
-                             [:name :string]
-                             [:email :string]]]]}
    :requires    [:db]
    :transitions #{:found :not-found}}
   [{:keys [db]} data]

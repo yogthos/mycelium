@@ -4,13 +4,6 @@
 
 (cell/defcell :auth/parse-request
   {:doc         "Extract and validate credentials from the HTTP request"
-   :schema      {:input  [:map
-                           [:http-request [:map
-                             [:headers map?]
-                             [:body map?]]]]
-                 :output [:map
-                           [:user-id :string]
-                           [:auth-token :string]]}
    :transitions #{:success :failure}}
   [_resources data]
   (let [body    (get-in data [:http-request :body])
@@ -29,11 +22,6 @@
 
 (cell/defcell :auth/validate-session
   {:doc         "Check credentials against the session store"
-   :schema      {:input  [:map
-                           [:user-id :string]
-                           [:auth-token :string]]
-                 :output [:map
-                           [:session-valid :boolean]]}
    :requires    [:db]
    :transitions #{:authorized :unauthorized}}
   [{:keys [db]} data]

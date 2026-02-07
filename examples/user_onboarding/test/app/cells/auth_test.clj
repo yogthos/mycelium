@@ -9,6 +9,8 @@
 (use-fixtures :each (fn [f]
                       (when-not (cell/get-cell :auth/parse-request)
                         (require 'app.cells.auth :reload))
+                      ;; Load manifest to attach schemas
+                      (require 'app.workflows.onboarding :reload)
                       (f)))
 
 (deftest parse-request-success-test

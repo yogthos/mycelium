@@ -6,6 +6,8 @@
 (use-fixtures :each (fn [f]
                       (when-not (cell/get-cell :ui/render-home)
                         (require 'app.cells.ui :reload))
+                      ;; Load manifest to attach schemas
+                      (require 'app.workflows.onboarding :reload)
                       (f)))
 
 (deftest render-home-test
