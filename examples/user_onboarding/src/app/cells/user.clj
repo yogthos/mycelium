@@ -1,5 +1,6 @@
 (ns app.cells.user
-  (:require [mycelium.cell :as cell]))
+  (:require [mycelium.cell :as cell]
+            [app.db :as db]))
 
 (cell/defcell :user/fetch-profile
   {:doc         "Fetch user profile from database"
@@ -13,10 +14,10 @@
    :requires    [:db]
    :transitions #{:found :not-found}}
   [{:keys [db]} data]
-  (let [profile (get-in db [:users (:user-id data)])]
-    (if profile
+  (let [user (db/get-user db (:user-id data))]
+    (if user
       (assoc data
-             :profile profile
+             :profile (select-keys user [:name :email])
              :mycelium/transition :found)
       (assoc data
              :mycelium/transition :not-found))))

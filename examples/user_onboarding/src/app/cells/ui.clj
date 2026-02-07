@@ -10,11 +10,12 @@
                  :output [:map
                            [:http-response [:map
                              [:status :int]
-                             [:body :string]]]]}
+                             [:body map?]]]]}
    :transitions #{:done}}
   [_resources data]
   (let [{:keys [name email]} (:profile data)]
     (assoc data
            :http-response {:status 200
-                           :body   (str "Welcome, " name " (" email ")!")}
+                           :body   {:message (str "Welcome, " name "!")
+                                    :profile {:name name :email email}}}
            :mycelium/transition :done)))

@@ -1,0 +1,13 @@
+CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL);
+--;;
+CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), valid INTEGER DEFAULT 1);
+--;;
+INSERT INTO users VALUES ('alice','Alice Smith','alice@example.com');
+--;;
+INSERT INTO users VALUES ('bob','Bob Jones','bob@example.com');
+--;;
+INSERT INTO sessions VALUES ('tok_abc123','alice',1);
+--;;
+INSERT INTO sessions VALUES ('tok_bob456','bob',1);
+--;;
+INSERT INTO sessions VALUES ('tok_expired','alice',0);

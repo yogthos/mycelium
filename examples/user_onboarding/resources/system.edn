@@ -1,0 +1,5 @@
+{:app/db         {:jdbc-url "jdbc:sqlite:onboarding.db"}
+ :app/migrations {:db #ig/ref :app/db}
+ :app/handler    {:db #ig/ref :app/db}
+ :app/server     {:handler #ig/ref :app/handler
+                  :port    3000}}

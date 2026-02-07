@@ -6,8 +6,6 @@
  :aliases
  {:dev  {:extra-paths ["dev" "test" "examples"]
          :extra-deps  {nrepl/nrepl {:mvn/version "1.3.0"}}}
-  :test {:extra-paths ["test"
-                        "examples/user_onboarding/src"
-                        "examples/user_onboarding/test"]
+  :test {:extra-paths ["test"]
          :extra-deps  {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
          :main-opts   ["-m" "kaocha.runner"]}}}

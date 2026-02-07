@@ -1,0 +1,18 @@
+{:paths ["src" "resources"]
+ :deps  {io.github.yogthos/mycelium       {:local/root "../.."}
+         ;; HTTP
+         ring/ring-core                    {:mvn/version "1.12.2"}
+         ring/ring-jetty-adapter           {:mvn/version "1.12.2"}
+         metosin/reitit-ring               {:mvn/version "0.7.2"}
+         metosin/muuntaja                  {:mvn/version "0.6.10"}
+         ;; System lifecycle
+         integrant/integrant               {:mvn/version "0.13.1"}
+         ;; DB
+         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+         org.xerial/sqlite-jdbc            {:mvn/version "3.47.1.0"}
+         migratus/migratus                 {:mvn/version "1.5.6"}}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps  {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+         :main-opts   ["-m" "kaocha.runner"]}
+  :run  {:main-opts ["-m" "app.core"]}}}
