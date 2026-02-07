@@ -9,11 +9,12 @@
 (defn test-cell
   "Runs a single cell in isolation with full schema validation.
    Options:
-     :input     - input data map
-     :resources - resources map (default {})
+     :input               - input data map
+     :resources           - resources map (default {})
+     :expected-transition  - if set, verifies the handler returned this transition
    Returns:
      {:pass? bool :errors [...] :output {...} :duration-ms n}"
-  [cell-id {:keys [input resources] :or {resources {}}}]
+  [cell-id {:keys [input resources expected-transition] :or {resources {}}}]
   (let [cell       (cell/get-cell! cell-id)
         start-time (System/nanoTime)
         ;; Validate input
@@ -26,10 +27,19 @@
       (try
         (let [output      ((:handler cell) resources input)
               duration-ms (/ (- (System/nanoTime) start-time) 1e6)
-              output-err  (schema/validate-output cell output)]
-          (if output-err
+              output-err  (schema/validate-output cell output)
+              actual-trans (:mycelium/transition output)
+              trans-err   (when (and expected-transition
+                                     (not= expected-transition actual-trans))
+                            {:phase :transition
+                             :detail (str "Expected transition " expected-transition
+                                          " but got " actual-trans)})
+              all-errors  (cond-> []
+                            output-err (conj {:phase :output :detail output-err})
+                            trans-err  (conj trans-err))]
+          (if (seq all-errors)
             {:pass?       false
-             :errors      [{:phase :output :detail output-err}]
+             :errors      all-errors
              :output      output
              :duration-ms duration-ms}
             {:pass?       true
@@ -41,6 +51,43 @@
            :errors      [{:phase :handler :detail (ex-message e)}]
            :output      nil
            :duration-ms (/ (- (System/nanoTime) start-time) 1e6)})))))
+
+(defn test-transitions
+  "Tests a cell across multiple transitions.
+   cases: {transition-kw {:input ... :resources ...}}
+   Returns: {transition-kw test-result}"
+  [cell-id cases]
+  (into {}
+        (map (fn [[transition opts]]
+               [transition (test-cell cell-id (assoc opts :expected-transition transition))]))
+        cases))
+
+(defn enumerate-paths
+  "Enumerates all paths from :start to terminal states in a manifest.
+   Returns seq of paths, each a vector of {:cell :transition :target}."
+  [{:keys [cells edges]}]
+  (let [terminal? #{:end :error :halt}]
+    (loop [queue [[:start []]]
+           paths []]
+      (if (empty? queue)
+        paths
+        (let [[cell-name path-so-far] (first queue)
+              rest-queue (rest queue)]
+          (if (terminal? cell-name)
+            (recur rest-queue (conj paths path-so-far))
+            (let [edge-def (get edges cell-name)]
+              (if (keyword? edge-def)
+                ;; Unconditional — use :unconditional as transition label
+                (let [step {:cell cell-name :transition :unconditional :target edge-def}]
+                  (recur (conj (vec rest-queue) [edge-def (conj path-so-far step)])
+                         paths))
+                ;; Map edges
+                (let [next-items (mapv (fn [[transition target]]
+                                         (let [step {:cell cell-name :transition transition :target target}]
+                                           [target (conj path-so-far step)]))
+                                       edge-def)]
+                  (recur (into (vec rest-queue) next-items)
+                         paths))))))))))
 
 (defn- dot-id
   "Converts a keyword name to a valid DOT identifier by quoting it."

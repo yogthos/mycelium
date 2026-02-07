@@ -91,3 +91,59 @@
       (is (some? (:schema cell)))
       (is (= [:map [:x :int]] (get-in cell [:schema :input])))
       (is (= [:map [:y :int]] (get-in cell [:schema :output]))))))
+
+;; ===== Per-transition output schema in manifest =====
+
+(def per-transition-manifest
+  {:id :test/pt-workflow
+   :doc "A workflow with per-transition output schemas"
+   :cells {:start
+           {:id       :test/lookup
+            :doc      "Look up a thing"
+            :schema   {:input  [:map [:id :string]]
+                       :output {:found     [:map [:profile [:map [:name :string]]]]
+                                :not-found [:map [:error-message :string]]}}
+            :requires [:db]
+            :transitions #{:found :not-found}}
+           :render
+           {:id       :test/render
+            :doc      "Render output"
+            :schema   {:input  [:map [:profile [:map [:name :string]]]]
+                       :output [:map [:html :string]]}
+            :requires []
+            :transitions #{:done}}}
+   :edges {:start  {:found     :render
+                    :not-found :error}
+           :render {:done :end}}})
+
+(deftest per-transition-manifest-validates-test
+  (testing "Manifest with per-transition output passes validation"
+    (let [result (manifest/validate-manifest per-transition-manifest)]
+      (is (= :test/pt-workflow (:id result))))))
+
+(deftest per-transition-manifest-key-mismatch-test
+  (testing "Output map keys / transitions mismatch → rejected"
+    (let [bad (assoc-in per-transition-manifest [:cells :start :schema :output]
+                        {:found     [:map [:profile :map]]
+                         :typo      [:map [:error :string]]})]
+      (is (thrown-with-msg? Exception #"not in transitions|missing keys"
+            (manifest/validate-manifest bad))))))
+
+(deftest cell-brief-per-transition-prompt-test
+  (testing "cell-brief shows per-transition schemas in prompt"
+    (let [brief (manifest/cell-brief per-transition-manifest :start)]
+      (is (string? (:prompt brief)))
+      ;; Should mention both transitions
+      (is (re-find #":found" (:prompt brief)))
+      (is (re-find #":not-found" (:prompt brief)))
+      ;; Should mention per-transition schema details
+      (is (re-find #"profile" (:prompt brief)))
+      (is (re-find #"error-message" (:prompt brief))))))
+
+(deftest manifest-to-workflow-per-transition-test
+  (testing "manifest->workflow applies per-transition schema to cells"
+    (let [workflow-def (manifest/manifest->workflow per-transition-manifest)]
+      (is (map? workflow-def))
+      (let [cell (cell/get-cell :test/lookup)]
+        (is (map? (get-in cell [:schema :output])))
+        (is (= #{:found :not-found} (set (keys (get-in cell [:schema :output])))))))))

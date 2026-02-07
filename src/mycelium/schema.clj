@@ -21,13 +21,24 @@
        :errors  (me/humanize explanation)
        :data    data})))
 
+(defn output-schema-for-transition
+  "Returns the output schema for a specific transition of a cell.
+   If output is nil → nil. If vector → same schema for all transitions.
+   If map → schema for that transition key (or nil if not found)."
+  [cell transition]
+  (let [output (get-in cell [:schema :output])]
+    (cond
+      (nil? output)    nil
+      (vector? output) output
+      (map? output)    (get output transition))))
+
 (defn validate-output
   "Validates data against the cell's output schema and transition.
    Returns nil if valid (or if no output schema is defined), or an error map if invalid.
+   Supports both single-schema (vector) and per-transition (map) output schemas.
    Transition validation is always performed regardless of schema presence."
   [cell data]
-  (let [schema      (get-in cell [:schema :output])
-        transition  (:mycelium/transition data)
+  (let [transition  (:mycelium/transition data)
         transitions (:transitions cell)]
     (cond
       (nil? transition)
@@ -44,7 +55,7 @@
        :data    data}
 
       :else
-      (when schema
+      (when-let [schema (output-schema-for-transition cell transition)]
         (when-let [explanation (m/explain schema data)]
           {:cell-id (:id cell)
            :phase   :output

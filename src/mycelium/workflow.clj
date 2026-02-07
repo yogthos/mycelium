@@ -115,21 +115,49 @@
                              :dead-edges dead-edges
                              :declared   declared}))))))))
 
+(defn- get-map-keys
+  "Extracts top-level keys from a Malli :map schema. Returns nil if not a :map schema."
+  [schema]
+  (when (and (vector? schema) (= :map (first schema)))
+    (set (map first (rest schema)))))
+
+(defn- get-output-keys-for-transition
+  "Gets output keys for a specific transition of a cell.
+   For vector output schema, returns all keys for any transition.
+   For map output schema, returns keys for that specific transition."
+  [cell-id transition]
+  (let [cell   (cell/get-cell! cell-id)
+        output (get-in cell [:schema :output])]
+    (cond
+      (nil? output)    nil
+      (vector? output) (get-map-keys output)
+      (map? output)    (when-let [schema (get output transition)]
+                         (get-map-keys schema)))))
+
+(defn- get-all-output-keys
+  "Gets the union of all output keys across all transitions.
+   Used for unconditional edges where all transitions route to the same target."
+  [cell-id]
+  (let [cell   (cell/get-cell! cell-id)
+        output (get-in cell [:schema :output])]
+    (cond
+      (nil? output)    nil
+      (vector? output) (get-map-keys output)
+      (map? output)    (reduce (fn [acc [_ schema]]
+                                 (into acc (get-map-keys schema)))
+                               #{}
+                               output))))
+
 (defn- validate-schema-chain!
   "Walks all paths from :start, accumulating output keys.
-   For each cell, checks its input keys are available from upstream outputs or workflow input."
+   For each cell, checks its input keys are available from upstream outputs or workflow input.
+   For per-transition output schemas, only passes the keys from the matching transition's schema
+   along each edge."
   [edges-map cells-map]
   (let [get-input-keys  (fn [cell-id]
                           (let [cell   (cell/get-cell! cell-id)
                                 schema (get-in cell [:schema :input])]
-                            (when (and (vector? schema) (= :map (first schema)))
-                              (set (map first (rest schema))))))
-        get-output-keys (fn [cell-id]
-                          (let [cell   (cell/get-cell! cell-id)
-                                schema (get-in cell [:schema :output])]
-                            (when (and (vector? schema) (= :map (first schema)))
-                              (set (map first (rest schema))))))
-        ;; DFS collecting available keys at each node
+                            (get-map-keys schema)))
         errors (atom [])
         visit  (fn visit [cell-name available-keys visited]
                  (when-not (or (contains? visited cell-name)
@@ -144,24 +172,31 @@
                                :cell-id       cell-id
                                :missing-keys  missing
                                :available-keys available-keys}))
-                     ;; Accumulate output keys
-                     (let [new-keys (into available-keys (get-output-keys cell-id))
-                           edge-def (get edges-map cell-name)
-                           targets  (if (keyword? edge-def) [edge-def] (vals edge-def))]
-                       (doseq [target targets]
-                         (visit target new-keys (conj visited cell-name)))))))]
-    ;; Start with :start cell's input keys as "available" (provided by workflow input)
-    (let [start-cell-id  (get cells-map :start)
-          start-out-keys (when start-cell-id (get-output-keys start-cell-id))
-          ;; The workflow's initial data provides whatever :start needs
-          ;; Start's outputs become available for next cells
+                     ;; Traverse edges, using per-transition output keys
+                     (let [edge-def (get edges-map cell-name)]
+                       (if (keyword? edge-def)
+                         ;; Unconditional edge — use union of all output keys
+                         (let [out-keys (get-all-output-keys cell-id)
+                               new-keys (into available-keys (or out-keys #{}))]
+                           (visit edge-def new-keys (conj visited cell-name)))
+                         ;; Map edges — per-transition output keys
+                         (doseq [[transition target] edge-def]
+                           (let [out-keys (get-output-keys-for-transition cell-id transition)
+                                 new-keys (into available-keys (or out-keys #{}))]
+                             (visit target new-keys (conj visited cell-name)))))))))]
+    ;; Start with :start cell
+    (let [start-cell-id    (get cells-map :start)
           start-input-keys (when start-cell-id (get-input-keys start-cell-id))
-          initial-keys   (into (or start-input-keys #{})
-                               (or start-out-keys #{}))
-          edge-def       (get edges-map :start)
-          targets        (if (keyword? edge-def) [edge-def] (vals edge-def))]
-      (doseq [target targets]
-        (visit target initial-keys #{:start})))
+          initial-keys     (or start-input-keys #{})
+          edge-def         (get edges-map :start)]
+      (if (keyword? edge-def)
+        (let [out-keys (get-all-output-keys start-cell-id)
+              new-keys (into initial-keys (or out-keys #{}))]
+          (visit edge-def new-keys #{:start}))
+        (doseq [[transition target] edge-def]
+          (let [out-keys (get-output-keys-for-transition start-cell-id transition)
+                new-keys (into initial-keys (or out-keys #{}))]
+            (visit target new-keys #{:start})))))
     (when (seq @errors)
       (let [msg (str "Schema chain error: "
                      (str/join

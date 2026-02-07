@@ -9,9 +9,12 @@
                         [:http-request [:map
                           [:headers map?]
                           [:body map?]]]]
-              :output [:map
-                        [:user-id :string]
-                        [:auth-token :string]]}
+              :output {:success [:map
+                                  [:user-id :string]
+                                  [:auth-token :string]]
+                       :failure [:map
+                                  [:error-type :keyword]
+                                  [:error-message :string]]}}
    :requires []
    :transitions #{:success :failure}}
 
@@ -21,8 +24,13 @@
    :schema   {:input  [:map
                         [:user-id :string]
                         [:auth-token :string]]
-              :output [:map
-                        [:session-valid :boolean]]}
+              :output {:authorized   [:map
+                                       [:session-valid :boolean]
+                                       [:user-id :string]]
+                       :unauthorized [:map
+                                       [:session-valid :boolean]
+                                       [:error-type :keyword]
+                                       [:error-message :string]]}}
    :requires [:db]
    :transitions #{:authorized :unauthorized}}
 
@@ -32,10 +40,13 @@
    :schema   {:input  [:map
                         [:user-id :string]
                         [:session-valid :boolean]]
-              :output [:map
-                        [:profile [:map
-                          [:name :string]
-                          [:email :string]]]]}
+              :output {:found     [:map
+                                    [:profile [:map
+                                      [:name :string]
+                                      [:email :string]]]]
+                       :not-found [:map
+                                    [:error-type :keyword]
+                                    [:error-message :string]]}}
    :requires [:db]
    :transitions #{:found :not-found}}
 

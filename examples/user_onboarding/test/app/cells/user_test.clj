@@ -66,3 +66,31 @@
                      :resources {:db :mock-ds}})]
         (is (= :not-found (get-in result [:output :mycelium/transition])))
         (is (= :not-found (get-in result [:output :error-type])))))))
+
+;; ===== test-transitions for multi-transition cells =====
+
+(deftest fetch-profile-test-transitions-test
+  (testing "test-transitions covers both fetch-profile transitions"
+    (with-redefs [db/get-user (fn [_ds user-id]
+                                (when (= user-id "alice")
+                                  {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
+      (let [results (dev/test-transitions :user/fetch-profile
+                      {:found     {:input {:user-id "alice" :session-valid true}
+                                   :resources {:db :mock-ds}}
+                       :not-found {:input {:user-id "nobody" :session-valid true}
+                                   :resources {:db :mock-ds}}})]
+        (is (true? (get-in results [:found :pass?])))
+        (is (true? (get-in results [:not-found :pass?])))))))
+
+(deftest fetch-profile-by-id-test-transitions-test
+  (testing "test-transitions covers both fetch-profile-by-id transitions"
+    (with-redefs [db/get-user (fn [_ds user-id]
+                                (when (= user-id "alice")
+                                  {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
+      (let [results (dev/test-transitions :user/fetch-profile-by-id
+                      {:found     {:input {:http-request {:path-params {:id "alice"}}}
+                                   :resources {:db :mock-ds}}
+                       :not-found {:input {:http-request {:path-params {:id "nobody"}}}
+                                   :resources {:db :mock-ds}}})]
+        (is (true? (get-in results [:found :pass?])))
+        (is (true? (get-in results [:not-found :pass?])))))))

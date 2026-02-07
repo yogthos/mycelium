@@ -187,3 +187,80 @@
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
             :edges {:start {:success :end, :failure :error, :typo :error}}})))))
+
+;; ===== Per-transition schema chain validation =====
+
+(defn- register-per-transition-cells! []
+  (cell/register-cell!
+   {:id :test/lookup
+    :handler (fn [_ data]
+               (if (= (:id data) "alice")
+                 (assoc data :profile {:name "Alice"} :mycelium/transition :found)
+                 (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+    :schema {:input [:map [:id :string]]
+             :output {:found     [:map [:profile [:map [:name :string]]]]
+                      :not-found [:map [:error-message :string]]}}
+    :transitions #{:found :not-found}})
+  (cell/register-cell!
+   {:id :test/render-profile
+    :handler (fn [_ data] (assoc data :html "ok" :mycelium/transition :done))
+    :schema {:input [:map [:profile [:map [:name :string]]]]
+             :output [:map [:html :string]]}
+    :transitions #{:done}})
+  (cell/register-cell!
+   {:id :test/render-error
+    :handler (fn [_ data] (assoc data :html "error" :mycelium/transition :done))
+    :schema {:input [:map [:error-message :string]]
+             :output [:map [:html :string]]}
+    :transitions #{:done}}))
+
+(deftest per-transition-schema-chain-valid-test
+  (testing "Per-transition schemas — valid workflow compiles"
+    (register-per-transition-cells!)
+    (let [workflow {:cells {:start         :test/lookup
+                            :render-profile :test/render-profile
+                            :render-error   :test/render-error}
+                    :edges {:start          {:found :render-profile
+                                             :not-found :render-error}
+                            :render-profile {:done :end}
+                            :render-error   {:done :end}}}]
+      (is (some? (wf/compile-workflow workflow))))))
+
+(deftest per-transition-schema-chain-catches-missing-key-test
+  (testing "Not-found path missing keys downstream cell needs → caught"
+    (register-per-transition-cells!)
+    ;; :render-profile needs :profile, but on :not-found path only :error-message is available
+    ;; Wire :not-found to :render-profile (which needs :profile) — should fail
+    (is (thrown-with-msg? Exception #"[Ss]chema chain"
+          (wf/compile-workflow
+           {:cells {:start         :test/lookup
+                    :render-profile :test/render-profile}
+            :edges {:start          {:found :render-profile
+                                     :not-found :render-profile}
+                    :render-profile {:done :end}}})))))
+
+(deftest per-transition-schema-chain-two-paths-independent-test
+  (testing "Two paths have different keys, each validates independently"
+    (register-per-transition-cells!)
+    ;; :found → render-profile (needs :profile ✓)
+    ;; :not-found → render-error (needs :error-message ✓)
+    ;; Both paths are valid independently
+    (is (some? (wf/compile-workflow
+                {:cells {:start         :test/lookup
+                         :render-profile :test/render-profile
+                         :render-error   :test/render-error}
+                 :edges {:start          {:found :render-profile
+                                          :not-found :render-error}
+                         :render-profile {:done :end}
+                         :render-error   {:done :end}}})))))
+
+(deftest single-vector-schema-chain-still-works-test
+  (testing "Single vector output schema still works in chain validation"
+    (register-cells!)
+    (let [workflow {:cells {:start  :test/cell-a
+                            :step-b :test/cell-b
+                            :step-c :test/cell-c}
+                    :edges {:start  {:success :step-b, :failure :error}
+                            :step-b {:success :step-c}
+                            :step-c {:done :end}}}]
+      (is (some? (wf/compile-workflow workflow))))))

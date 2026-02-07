@@ -1,6 +1,7 @@
 (ns mycelium.cell
   "Cell registry and defcell macro for Mycelium."
-  (:require [malli.core :as m]))
+  (:require [clojure.set]
+            [malli.core :as m]))
 
 (defonce ^:private registry (atom {}))
 
@@ -16,6 +17,35 @@
       (throw (ex-info (str "Invalid Malli schema for " label ": " (ex-message e))
                       {:label label :schema schema}
                       e)))))
+
+(defn- validate-output-schema!
+  "Validates an output schema which may be a single schema (vector) or per-transition map.
+   If a map, validates each value as a Malli schema and optionally checks keys match transitions."
+  [output-schema transitions label]
+  (cond
+    (vector? output-schema)
+    (validate-schema! output-schema label)
+
+    (map? output-schema)
+    (do
+      (doseq [[k v] output-schema]
+        (validate-schema! v (str label " transition " k)))
+      (when transitions
+        (let [schema-keys  (set (keys output-schema))
+              trans-set    (set transitions)
+              extra        (clojure.set/difference schema-keys trans-set)
+              missing      (clojure.set/difference trans-set schema-keys)]
+          (when (seq extra)
+            (throw (ex-info (str "Output schema has keys " extra
+                                 " not in transitions " trans-set " for " label)
+                            {:label label :extra extra :transitions trans-set})))
+          (when (seq missing)
+            (throw (ex-info (str "Output schema missing keys " missing
+                                 " for transitions " trans-set " in " label)
+                            {:label label :missing missing :transitions trans-set}))))))
+
+    :else
+    (validate-schema! output-schema label)))
 
 (defn register-cell!
   "Validates and registers a cell spec in the global registry.
@@ -39,7 +69,7 @@
      (when (:input schema)
        (validate-schema! (:input schema) (str id " :input")))
      (when (:output schema)
-       (validate-schema! (:output schema) (str id " :output"))))
+       (validate-output-schema! (:output schema) transitions (str id " :output"))))
    (swap! registry
           (fn [reg]
             (when (and (not replace?) (get reg id))
@@ -68,10 +98,11 @@
   (when-not (get @registry cell-id)
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
-  (when (:input schema)
-    (validate-schema! (:input schema) (str cell-id " :input")))
-  (when (:output schema)
-    (validate-schema! (:output schema) (str cell-id " :output")))
+  (let [transitions (:transitions (get @registry cell-id))]
+    (when (:input schema)
+      (validate-schema! (:input schema) (str cell-id " :input")))
+    (when (:output schema)
+      (validate-output-schema! (:output schema) transitions (str cell-id " :output"))))
   (swap! registry assoc-in [cell-id :schema] schema)
   schema)
 

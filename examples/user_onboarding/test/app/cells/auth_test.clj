@@ -113,3 +113,26 @@
                   {:input {:http-request {:cookies {}}}
                    :resources {}})]
       (is (= :failure (get-in result [:output :mycelium/transition]))))))
+
+;; ===== test-transitions for multi-transition cells =====
+
+(deftest parse-request-test-transitions-test
+  (testing "test-transitions covers both parse-request transitions"
+    (let [results (dev/test-transitions :auth/parse-request
+                    {:success {:input {:http-request {:headers {} :body {"username" "alice" "token" "tok_abc"}}}}
+                     :failure {:input {:http-request {:headers {} :body {}}}}})]
+      (is (true? (get-in results [:success :pass?])))
+      (is (true? (get-in results [:failure :pass?]))))))
+
+(deftest validate-session-test-transitions-test
+  (testing "test-transitions covers both validate-session transitions"
+    (with-redefs [db/get-session (fn [_ds token]
+                                   (when (= token "tok_valid")
+                                     {:user_id "alice" :valid 1}))]
+      (let [results (dev/test-transitions :auth/validate-session
+                      {:authorized   {:input {:user-id "alice" :auth-token "tok_valid"}
+                                      :resources {:db :mock-ds}}
+                       :unauthorized {:input {:user-id "alice" :auth-token "bad"}
+                                      :resources {:db :mock-ds}}})]
+        (is (true? (get-in results [:authorized :pass?])))
+        (is (true? (get-in results [:unauthorized :pass?])))))))

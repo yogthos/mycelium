@@ -68,3 +68,88 @@
                             :fetch-profile {:done :end}}}
           dot (dev/workflow->dot manifest)]
       (is (re-find #"\"fetch-profile\"" dot)))))
+
+;; ===== test-cell with :expected-transition =====
+
+(deftest test-cell-expected-transition-pass-test
+  (testing "test-cell with :expected-transition passes when transition matches"
+    (cell/defcell :dev/trans-cell
+      {:transitions #{:ok :fail}}
+      [_ data]
+      (assoc data :y 1 :mycelium/transition :ok))
+    (cell/set-cell-schema! :dev/trans-cell
+                           {:input [:map [:x :int]]
+                            :output [:map [:y :int]]})
+    (let [result (dev/test-cell :dev/trans-cell
+                                {:input {:x 5}
+                                 :expected-transition :ok})]
+      (is (true? (:pass? result))))))
+
+(deftest test-cell-expected-transition-fail-test
+  (testing "test-cell with :expected-transition fails when transition doesn't match"
+    (cell/defcell :dev/trans-cell2
+      {:transitions #{:ok :fail}}
+      [_ data]
+      (assoc data :y 1 :mycelium/transition :ok))
+    (cell/set-cell-schema! :dev/trans-cell2
+                           {:input [:map [:x :int]]
+                            :output [:map [:y :int]]})
+    (let [result (dev/test-cell :dev/trans-cell2
+                                {:input {:x 5}
+                                 :expected-transition :fail})]
+      (is (false? (:pass? result)))
+      (is (some #(= :transition (:phase %)) (:errors result))))))
+
+(deftest test-cell-per-transition-schema-test
+  (testing "test-cell validates against per-transition schema"
+    (cell/defcell :dev/pt-cell
+      {:transitions #{:found :not-found}}
+      [_ data]
+      (assoc data :profile {:name "Alice"} :mycelium/transition :found))
+    (cell/set-cell-schema! :dev/pt-cell
+                           {:input [:map [:id :string]]
+                            :output {:found     [:map [:profile [:map [:name :string]]]]
+                                     :not-found [:map [:error-message :string]]}})
+    (let [result (dev/test-cell :dev/pt-cell
+                                {:input {:id "alice"}})]
+      (is (true? (:pass? result))))))
+
+;; ===== test-transitions =====
+
+(deftest test-transitions-test
+  (testing "test-transitions tests multiple transitions in one call"
+    (cell/defcell :dev/multi-cell
+      {:transitions #{:found :not-found}}
+      [_ data]
+      (if (= (:id data) "alice")
+        (assoc data :profile {:name "Alice"} :mycelium/transition :found)
+        (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+    (cell/set-cell-schema! :dev/multi-cell
+                           {:input [:map [:id :string]]
+                            :output {:found     [:map [:profile [:map [:name :string]]]]
+                                     :not-found [:map [:error-message :string]]}})
+    (let [results (dev/test-transitions :dev/multi-cell
+                    {:found     {:input {:id "alice"}}
+                     :not-found {:input {:id "nobody"}}})]
+      (is (true? (get-in results [:found :pass?])))
+      (is (true? (get-in results [:not-found :pass?])))
+      (is (= :found (get-in results [:found :output :mycelium/transition])))
+      (is (= :not-found (get-in results [:not-found :output :mycelium/transition]))))))
+
+;; ===== enumerate-paths =====
+
+(deftest enumerate-paths-test
+  (testing "enumerate-paths lists all paths through a workflow"
+    (let [manifest {:cells {:start  {:id :test/a :transitions #{:ok :fail}}
+                            :step-b {:id :test/b :transitions #{:done}}
+                            :step-c {:id :test/c :transitions #{:done}}}
+                    :edges {:start  {:ok :step-b, :fail :step-c}
+                            :step-b {:done :end}
+                            :step-c {:done :end}}}
+          paths (dev/enumerate-paths manifest)]
+      ;; Should have 2 paths: start→step-b→end and start→step-c→end
+      (is (= 2 (count paths)))
+      ;; Each path should be a vector of steps
+      (is (every? vector? paths))
+      ;; Check first step in each path is start
+      (is (every? #(= :start (:cell (first %))) paths)))))

@@ -80,20 +80,45 @@ Edges map transition keywords to targets:
   {} {:value 42})
 ```
 
+### Per-Transition Output Schemas
+
+Cells with multiple transitions can declare different output schemas for each transition:
+
+```clojure
+(myc/defcell :user/fetch
+  {:transitions #{:found :not-found}
+   :requires [:db]}
+  [{:keys [db]} data]
+  (if-let [profile (get-user db (:user-id data))]
+    (assoc data :profile profile :mycelium/transition :found)
+    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+```
+
+In the manifest, use a map instead of a vector for `:output`:
+
+```clojure
+;; Single schema (all transitions must satisfy it)
+:output [:map [:profile map?]]
+
+;; Per-transition schemas (each transition has its own contract)
+:output {:found     [:map [:profile [:map [:name :string] [:email :string]]]]
+         :not-found [:map [:error-message :string]]}
+```
+
+The schema chain validator tracks which keys are available on each path independently, so a downstream cell on the `:found` path can require `:profile` without the `:not-found` path needing to produce it.
+
 ### Resources
 
 External dependencies are injected, never acquired by cells:
 
 ```clojure
 (myc/defcell :user/fetch
-  {:schema   {:input  [:map [:user-id :string]]
-              :output [:map [:profile map?]]}
-   :transitions #{:found :not-found}
+  {:transitions #{:found :not-found}
    :requires [:db]}
   [{:keys [db]} data]
   (if-let [profile (get-user db (:user-id data))]
     (assoc data :profile profile :mycelium/transition :found)
-    (assoc data :mycelium/transition :not-found)))
+    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
 
 ;; Resources are passed at run time
 (myc/run-workflow workflow {:db my-db-conn} {:user-id "alice"})
@@ -225,6 +250,34 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
   {:input     {:http-request {:headers {} :body {"username" "alice"}}}
    :resources {}})
 ;; => {:pass? true, :output {...}, :errors [], :duration-ms 0.42}
+
+;; Verify expected transition
+(dev/test-cell :auth/parse-request
+  {:input               {:http-request {:headers {} :body {}}}
+   :expected-transition :failure})
+;; => {:pass? true, ...} if handler returns :failure
+```
+
+### Test Multiple Transitions
+
+```clojure
+(dev/test-transitions :user/fetch-profile
+  {:found     {:input {:user-id "alice" :session-valid true}
+               :resources {:db my-db}}
+   :not-found {:input {:user-id "nobody" :session-valid true}
+               :resources {:db my-db}}})
+;; => {:found     {:pass? true, :output {...}}
+;;     :not-found {:pass? true, :output {...}}}
+```
+
+### Enumerate Workflow Paths
+
+```clojure
+(dev/enumerate-paths manifest)
+;; => [[{:cell :start, :transition :success, :target :validate}
+;;      {:cell :validate, :transition :authorized, :target :end}]
+;;     [{:cell :start, :transition :failure, :target :error}]
+;;     ...]
 ```
 
 ### Visualize a Workflow
@@ -276,7 +329,7 @@ mycelium/
 │   ├── dev.clj            ;; Testing harness, visualization
 │   ├── orchestrate.clj    ;; Agent orchestration helpers
 │   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 73 tests, 146 assertions
+└── test/mycelium/         ;; 97 tests, 188 assertions
 ```
 
 ## License

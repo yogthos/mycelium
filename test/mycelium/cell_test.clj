@@ -128,3 +128,65 @@
           (cell/set-cell-schema! :test/bad-schema-later
                                 {:input  [:not-a-real-schema-type]
                                  :output [:map [:y :int]]})))))
+
+;; ===== Per-transition output schema in register-cell! =====
+
+(deftest register-cell-map-output-schema-test
+  (testing "Map output schema accepted in register-cell!"
+    (cell/register-cell!
+     {:id          :test/map-out
+      :handler     (fn [_ d] d)
+      :schema      {:input  [:map [:x :int]]
+                    :output {:found     [:map [:profile :map]]
+                             :not-found [:map [:error-message :string]]}}
+      :transitions #{:found :not-found}})
+    (let [spec (cell/get-cell :test/map-out)]
+      (is (map? (get-in spec [:schema :output])))
+      (is (= #{:found :not-found} (set (keys (get-in spec [:schema :output]))))))))
+
+(deftest register-cell-map-output-invalid-malli-test
+  (testing "Invalid Malli in one transition value → rejected"
+    (is (thrown? Exception
+          (cell/register-cell!
+           {:id          :test/bad-trans-schema
+            :handler     (fn [_ d] d)
+            :schema      {:input  [:map [:x :int]]
+                          :output {:ok   [:map [:y :int]]
+                                   :fail [:not-a-real-schema-type]}}
+            :transitions #{:ok :fail}})))))
+
+(deftest register-cell-map-output-key-mismatch-test
+  (testing "Schema map keys that don't match transitions → rejected"
+    (is (thrown-with-msg? Exception #"not in transitions"
+          (cell/register-cell!
+           {:id          :test/key-mismatch
+            :handler     (fn [_ d] d)
+            :schema      {:input  [:map [:x :int]]
+                          :output {:ok   [:map [:y :int]]
+                                   :typo [:map [:z :string]]}}
+            :transitions #{:ok :fail}})))))
+
+(deftest register-cell-map-output-missing-transition-key-test
+  (testing "Schema map missing a transition key → rejected"
+    (is (thrown-with-msg? Exception #"missing keys"
+          (cell/register-cell!
+           {:id          :test/missing-key
+            :handler     (fn [_ d] d)
+            :schema      {:input  [:map [:x :int]]
+                          :output {:ok [:map [:y :int]]}}
+            :transitions #{:ok :fail}})))))
+
+;; ===== Per-transition output schema in set-cell-schema! =====
+
+(deftest set-cell-schema-map-output-test
+  (testing "set-cell-schema! accepts map format"
+    (cell/register-cell!
+     {:id          :test/set-map-out
+      :handler     (fn [_ d] d)
+      :transitions #{:found :not-found}})
+    (cell/set-cell-schema! :test/set-map-out
+                           {:input  [:map [:x :int]]
+                            :output {:found     [:map [:profile :map]]
+                                     :not-found [:map [:error :string]]}})
+    (let [spec (cell/get-cell :test/set-map-out)]
+      (is (map? (get-in spec [:schema :output]))))))

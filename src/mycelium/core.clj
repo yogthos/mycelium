@@ -2,6 +2,7 @@
   "Public API for the Mycelium framework.
    Re-exports key functions from internal namespaces."
   (:require [mycelium.cell :as cell]
+            [mycelium.dev :as dev]
             [mycelium.workflow :as workflow]
             [mycelium.compose :as compose]
             [mycelium.manifest :as manifest]
@@ -61,3 +62,15 @@
   ([workflow-def resources initial-data opts]
    (let [compiled (compile-workflow workflow-def opts)]
      (fsm/run compiled resources {:data initial-data}))))
+
+;; --- Dev tools ---
+
+(def test-transitions
+  "Tests a cell across multiple transitions.
+   See mycelium.dev/test-transitions."
+  dev/test-transitions)
+
+(def enumerate-paths
+  "Enumerates all paths from :start to terminal states.
+   See mycelium.dev/enumerate-paths."
+  dev/enumerate-paths)

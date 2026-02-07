@@ -16,8 +16,6 @@
              :auth-token token
              :mycelium/transition :success)
       (assoc data
-             :user-id       ""
-             :auth-token    ""
              :error-type    :bad-request
              :error-message "Missing username or token"
              :mycelium/transition :failure))))
@@ -35,7 +33,6 @@
              :session-valid true
              :mycelium/transition :authorized)
       (assoc data
-             :user-id       (or (:user-id data) "")
              :session-valid  false
              :error-type     :unauthorized
              :error-message  "Invalid or expired session token"
@@ -52,7 +49,6 @@
              :auth-token token
              :mycelium/transition :success)
       (assoc data
-             :auth-token    ""
              :error-type    :unauthorized
              :error-message "No session token provided"
              :mycelium/transition :failure))))
@@ -67,5 +63,4 @@
              :auth-token token
              :mycelium/transition :success)
       (assoc data
-             :auth-token ""
              :mycelium/transition :failure))))

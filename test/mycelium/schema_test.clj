@@ -157,3 +157,123 @@
       (wrapped {:mycelium/transition :success}) ;; missing :y
       (is (= :timeout (deref result 100 :timeout)))
       (is (not= :timeout (deref err 1000 :timeout))))))
+
+;; ===== output-schema-for-transition tests =====
+
+(deftest output-schema-for-transition-nil-test
+  (testing "Returns nil when cell has no output schema"
+    (cell/register-cell!
+     {:id          :test/no-out
+      :handler     (fn [_ data] data)
+      :transitions #{:ok}})
+    (let [cell (cell/get-cell! :test/no-out)]
+      (is (nil? (schema/output-schema-for-transition cell :ok))))))
+
+(deftest output-schema-for-transition-vector-test
+  (testing "Returns vector schema for any transition (backward compat)"
+    (register-test-cell!)
+    (let [cell (cell/get-cell! :test/cell-a)]
+      (is (= [:map [:y :int]] (schema/output-schema-for-transition cell :success)))
+      (is (= [:map [:y :int]] (schema/output-schema-for-transition cell :failure))))))
+
+(deftest output-schema-for-transition-map-test
+  (testing "Returns per-transition schema from map"
+    (cell/register-cell!
+     {:id          :test/per-trans
+      :handler     (fn [_ data] data)
+      :schema      {:input  [:map [:x :int]]
+                    :output {:found     [:map [:profile [:map [:name :string]]]]
+                             :not-found [:map [:error-message :string]]}}
+      :transitions #{:found :not-found}})
+    (let [cell (cell/get-cell! :test/per-trans)]
+      (is (= [:map [:profile [:map [:name :string]]]]
+             (schema/output-schema-for-transition cell :found)))
+      (is (= [:map [:error-message :string]]
+             (schema/output-schema-for-transition cell :not-found)))
+      (is (nil? (schema/output-schema-for-transition cell :unknown))))))
+
+;; ===== Per-transition validate-output tests =====
+
+(defn- register-per-transition-cell! []
+  (cell/register-cell!
+   {:id          :test/pt-cell
+    :handler     (fn [_ data] data)
+    :schema      {:input  [:map [:x :int]]
+                  :output {:success   [:map [:y :int]]
+                           :failure   [:map [:error-message :string]]}}
+    :transitions #{:success :failure}}))
+
+(deftest validate-output-per-transition-passes-test
+  (testing "Per-transition schema passes correct data for matching transition"
+    (register-per-transition-cell!)
+    (let [cell (cell/get-cell! :test/pt-cell)]
+      (is (nil? (schema/validate-output cell {:y 42 :mycelium/transition :success})))
+      (is (nil? (schema/validate-output cell {:error-message "oops" :mycelium/transition :failure}))))))
+
+(deftest validate-output-per-transition-rejects-wrong-data-test
+  (testing "Per-transition schema rejects wrong data for a transition"
+    (register-per-transition-cell!)
+    (let [cell (cell/get-cell! :test/pt-cell)]
+      ;; :success transition but missing :y
+      (is (some? (schema/validate-output cell {:error-message "oops" :mycelium/transition :success})))
+      ;; :failure transition but missing :error-message
+      (is (some? (schema/validate-output cell {:y 42 :mycelium/transition :failure}))))))
+
+(deftest validate-output-per-transition-rejects-unknown-transition-test
+  (testing "Per-transition schema rejects transition not in transitions set"
+    (register-per-transition-cell!)
+    (let [cell (cell/get-cell! :test/pt-cell)]
+      (is (some? (schema/validate-output cell {:y 42 :mycelium/transition :bogus}))))))
+
+;; ===== Post interceptor with per-transition schema =====
+
+(deftest post-interceptor-per-transition-passes-test
+  (testing "Post interceptor uses correct transition-specific schema"
+    (register-per-transition-cell!)
+    (let [state->cell {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          post        (schema/make-post-interceptor state->cell)
+          ;; :success path with :y
+          fsm-state-s {:last-state-id    :test/pt-cell
+                       :current-state-id :some/next
+                       :data             {:y 42 :mycelium/transition :success}}
+          ;; :failure path with :error-message
+          fsm-state-f {:last-state-id    :test/pt-cell
+                       :current-state-id :some/next
+                       :data             {:error-message "oops" :mycelium/transition :failure}}]
+      (is (= fsm-state-s (post fsm-state-s {})))
+      (is (= fsm-state-f (post fsm-state-f {}))))))
+
+(deftest post-interceptor-per-transition-rejects-test
+  (testing "Post interceptor rejects data that doesn't match transition-specific schema"
+    (register-per-transition-cell!)
+    (let [state->cell {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          post        (schema/make-post-interceptor state->cell)
+          fsm-state   {:last-state-id    :test/pt-cell
+                       :current-state-id :some/next
+                       :data             {:error-message "oops" :mycelium/transition :success}}
+          result      (post fsm-state {})]
+      (is (= ::fsm/error (:current-state-id result))))))
+
+;; ===== Async callback with per-transition schema =====
+
+(deftest wrap-async-callback-per-transition-forwards-test
+  (testing "wrap-async-callback forwards valid output for per-transition schema"
+    (register-per-transition-cell!)
+    (let [cell    (cell/get-cell! :test/pt-cell)
+          result  (promise)
+          err     (promise)
+          wrapped (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
+      (wrapped {:error-message "oops" :mycelium/transition :failure})
+      (is (= {:error-message "oops" :mycelium/transition :failure} (deref result 1000 :timeout)))
+      (is (= :timeout (deref err 100 :timeout))))))
+
+(deftest wrap-async-callback-per-transition-rejects-test
+  (testing "wrap-async-callback rejects invalid output for per-transition schema"
+    (register-per-transition-cell!)
+    (let [cell    (cell/get-cell! :test/pt-cell)
+          result  (promise)
+          err     (promise)
+          wrapped (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
+      (wrapped {:y 42 :mycelium/transition :failure}) ;; :failure needs :error-message, not :y
+      (is (= :timeout (deref result 100 :timeout)))
+      (is (not= :timeout (deref err 1000 :timeout))))))
