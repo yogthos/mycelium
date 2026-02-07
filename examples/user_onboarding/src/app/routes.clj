@@ -4,23 +4,19 @@
             [reitit.ring.middleware.muuntaja :as muuntaja]
             [ring.middleware.params :as params]
             [ring.middleware.cookies :as cookies]
+            [app.middleware :as mw]
             [app.workflows.onboarding :as onboarding]
             [app.workflows.home :as home]
             [app.workflows.login :as login]
             [app.workflows.dashboard :as dashboard]
             [app.workflows.users :as users]))
 
-(defn onboarding-handler [db]
+(defn- onboarding-handler [db]
   (fn [request]
-    (try
-      (let [result   (onboarding/run-onboarding db request)
-            response (:http-response result)]
-        {:status (:status response 200)
-         :body   (:body response)})
-      (catch Exception e
-        (let [msg (ex-message e)]
-          {:status 401
-           :body   {:error msg}})))))
+    (let [result   (onboarding/run-onboarding db request)
+          response (:http-response result)]
+      {:status (:status response 200)
+       :body   (:body response)})))
 
 (defn- html-response
   "Build a Ring response from a workflow result containing :html."
@@ -31,33 +27,22 @@
      :body    (:html result)}))
 
 (defn- html-handler
-  "Wraps a workflow runner function, returning an HTML Ring response.
-   runner-fn should return a workflow result map with :html key."
+  "Wraps a workflow runner function, returning an HTML Ring response."
   [runner-fn]
   (fn [request]
-    (try
-      (html-response (runner-fn request))
-      (catch Exception _e
-        {:status  500
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body    "<h1>500 Internal Server Error</h1>"}))))
+    (html-response (runner-fn request))))
 
 (defn- login-submit-handler
   "Handles login form submission. Sets session-token cookie on success."
   [db]
   (fn [request]
-    (try
-      (let [result   (login/run-login-submit db request)
-            response (html-response result)]
-        (if (:auth-token result)
-          (assoc response :cookies {"session-token" {:value     (:auth-token result)
-                                                     :path      "/"
-                                                     :http-only true}})
-          response))
-      (catch Exception _e
-        {:status  500
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :body    "<h1>500 Internal Server Error</h1>"}))))
+    (let [result   (login/run-login-submit db request)
+          response (html-response result)]
+      (if (and (:session-valid result) (:auth-token result))
+        (assoc response :cookies {"session-token" {:value     (:auth-token result)
+                                                   :path      "/"
+                                                   :http-only true}})
+        response))))
 
 (defn app [db]
   (ring/ring-handler
@@ -90,4 +75,4 @@
                                     (fn [request]
                                       (users/run-user-profile db request)))}}]])
    (ring/create-default-handler)
-   {:middleware [params/wrap-params cookies/wrap-cookies]}))
+   {:middleware [params/wrap-params cookies/wrap-cookies mw/wrap-errors]}))

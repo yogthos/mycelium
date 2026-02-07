@@ -2,6 +2,7 @@
   (:require [mycelium.manifest :as manifest]
             [mycelium.core :as myc]
             [clojure.java.io :as io]
+            [app.middleware :as mw]
             ;; Load cell definitions
             [app.cells.user]
             [app.cells.ui]))
@@ -23,7 +24,7 @@
 (defn run-user-list
   "Fetches all users and renders the list page."
   [db]
-  (myc/run-workflow user-list-workflow {:db db} {}))
+  (myc/run-workflow user-list-workflow {:db db} {} mw/workflow-opts))
 
 (defn run-user-profile
   "Fetches a single user and renders the profile page."
@@ -31,4 +32,5 @@
   (myc/run-workflow
    user-profile-workflow
    {:db db}
-   {:http-request {:path-params (:path-params request)}}))
+   {:http-request {:path-params (:path-params request)}}
+   mw/workflow-opts))

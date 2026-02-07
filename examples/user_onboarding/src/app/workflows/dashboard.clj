@@ -2,6 +2,7 @@
   (:require [mycelium.manifest :as manifest]
             [mycelium.core :as myc]
             [clojure.java.io :as io]
+            [app.middleware :as mw]
             ;; Load cell definitions
             [app.cells.auth]
             [app.cells.user]
@@ -20,4 +21,5 @@
   (myc/run-workflow
    workflow-def
    {:db db}
-   {:http-request {:query-params (or (:query-params request) {})}}))
+   {:http-request {:query-params (or (:query-params request) {})}}
+   mw/workflow-opts))

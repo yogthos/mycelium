@@ -210,9 +210,19 @@
                                      (when (:async? cell)
                                        {:async? true}))])))
                           cells)
-         ;; Build interceptors
-         pre  (schema/make-pre-interceptor state->cell)
-         post (schema/make-post-interceptor state->cell)
+         ;; Build interceptors — compose custom pre/post with schema interceptors
+         schema-pre  (schema/make-pre-interceptor state->cell)
+         schema-post (schema/make-post-interceptor state->cell)
+         pre  (if-let [custom-pre (:pre opts)]
+                (fn [fsm-state resources]
+                  (-> (schema-pre fsm-state resources)
+                      (custom-pre resources)))
+                schema-pre)
+         post (if-let [custom-post (:post opts)]
+                (fn [fsm-state resources]
+                  (-> (schema-post fsm-state resources)
+                      (custom-post resources)))
+                schema-post)
          ;; Merge custom on-end / on-error handlers
          spec {:fsm  (merge fsm-states
                             (when-let [on-error (:on-error opts)]

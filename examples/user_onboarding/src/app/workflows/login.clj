@@ -2,8 +2,10 @@
   (:require [mycelium.manifest :as manifest]
             [mycelium.core :as myc]
             [clojure.java.io :as io]
+            [app.middleware :as mw]
             ;; Load cell definitions
             [app.cells.auth]
+            [app.cells.user]
             [app.cells.ui]))
 
 (def login-page-manifest
@@ -23,7 +25,7 @@
 (defn run-login-page
   "Renders the login form."
   []
-  (myc/run-workflow login-page-workflow {} {}))
+  (myc/run-workflow login-page-workflow {} {} mw/workflow-opts))
 
 (defn run-login-submit
   "Processes login form submission."
@@ -34,4 +36,5 @@
    {:http-request {:headers (or (:headers request) {})
                    :body    (or (:form-params request)
                                 (:body-params request)
-                                (:body request))}}))
+                                (:body request))}}
+   mw/workflow-opts))

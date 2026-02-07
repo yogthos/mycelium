@@ -46,11 +46,18 @@
 
 (defn run-workflow
   "Convenience function: compiles and runs a workflow in one step.
-   Returns the final data map."
+   Returns the final data map.
+   opts — optional map passed to compile-workflow:
+     :pre  — additional pre-interceptor (fn [fsm-state resources] -> fsm-state)
+     :post — additional post-interceptor (fn [fsm-state resources] -> fsm-state)
+     :on-error — custom error handler
+     :on-end   — custom end handler"
   ([workflow-def]
-   (run-workflow workflow-def {} {}))
+   (run-workflow workflow-def {} {} {}))
   ([workflow-def resources]
-   (run-workflow workflow-def resources {}))
+   (run-workflow workflow-def resources {} {}))
   ([workflow-def resources initial-data]
-   (let [compiled (compile-workflow workflow-def)]
+   (run-workflow workflow-def resources initial-data {}))
+  ([workflow-def resources initial-data opts]
+   (let [compiled (compile-workflow workflow-def opts)]
      (fsm/run compiled resources {:data initial-data}))))

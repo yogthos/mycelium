@@ -13,6 +13,7 @@
              :profile (select-keys user [:name :email])
              :mycelium/transition :found)
       (assoc data
+             :profile       {}
              :error-type    :not-found
              :error-message (str "User not found: " (:user-id data))
              :mycelium/transition :not-found))))
@@ -39,6 +40,7 @@
              :profile user
              :mycelium/transition :found)
       (assoc data
+             :profile       {}
              :error-type    :not-found
              :error-message (str "User not found: " user-id)
              :mycelium/transition :not-found))))

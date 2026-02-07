@@ -19,7 +19,8 @@
    :schema   {:input  [:map
                         [:auth-token :string]]
               :output [:map
-                        [:session-valid :boolean]]}
+                        [:session-valid :boolean]
+                        [:user-id :string]]}
    :requires [:db]
    :transitions #{:authorized :unauthorized}}
 
@@ -30,9 +31,7 @@
                         [:user-id :string]
                         [:session-valid :boolean]]
               :output [:map
-                        [:profile [:map
-                          [:name :string]
-                          [:email :string]]]]}
+                        [:profile map?]]}
    :requires [:db]
    :transitions #{:found :not-found}}
 

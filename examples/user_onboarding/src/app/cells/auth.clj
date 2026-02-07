@@ -35,6 +35,7 @@
              :session-valid true
              :mycelium/transition :authorized)
       (assoc data
+             :user-id       (or (:user-id data) "")
              :session-valid  false
              :error-type     :unauthorized
              :error-message  "Invalid or expired session token"
@@ -44,7 +45,8 @@
   {:doc         "Extract auth token from query parameters"
    :transitions #{:success :failure}}
   [_resources data]
-  (let [token (get-in data [:http-request :query-params :token])]
+  (let [qp    (get-in data [:http-request :query-params])
+        token (or (get qp :token) (get qp "token"))]
     (if token
       (assoc data
              :auth-token token

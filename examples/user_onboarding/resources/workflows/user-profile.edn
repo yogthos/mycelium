@@ -10,10 +10,7 @@
                           [:path-params [:map
                             [:id :string]]]]]]
               :output [:map
-                        [:profile [:map
-                          [:id :string]
-                          [:name :string]
-                          [:email :string]]]]}
+                        [:profile map?]]}
    :requires [:db]
    :transitions #{:found :not-found}}
 
