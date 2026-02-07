@@ -41,10 +41,12 @@
                      {:id id})))
    (validate-schema! (:input schema) (str id " :input"))
    (validate-schema! (:output schema) (str id " :output"))
-   (when (and (not replace?) (get @registry id))
-     (throw (ex-info (str "Cell " id " already registered")
-                     {:id id})))
-   (swap! registry assoc id spec)
+   (swap! registry
+          (fn [reg]
+            (when (and (not replace?) (get reg id))
+              (throw (ex-info (str "Cell " id " already registered")
+                              {:id id})))
+            (assoc reg id spec)))
    spec))
 
 (defn get-cell

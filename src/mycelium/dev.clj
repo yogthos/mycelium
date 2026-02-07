@@ -1,6 +1,8 @@
 (ns mycelium.dev
   "Development utilities: cell testing, scaffolding, visualization."
   (:require [clojure.string :as str]
+            [malli.core :as m]
+            [malli.generator :as mg]
             [mycelium.cell :as cell]
             [mycelium.schema :as schema]))
 
@@ -40,6 +42,11 @@
            :output      nil
            :duration-ms (/ (- (System/nanoTime) start-time) 1e6)})))))
 
+(defn- dot-id
+  "Converts a keyword name to a valid DOT identifier by quoting it."
+  [kw]
+  (str "\"" (name kw) "\""))
+
 (defn workflow->dot
   "Generates a DOT graph string from a manifest for visualization."
   [{:keys [cells edges]}]
@@ -49,18 +56,27 @@
     (.append sb "  node [shape=box];\n")
     ;; Add nodes
     (doseq [[cell-name _cell-def] cells]
-      (.append sb (str "  " (name cell-name) ";\n")))
-    (.append sb "  end [shape=doublecircle];\n")
-    (.append sb "  error [shape=doubleoctagon color=red];\n")
+      (.append sb (str "  " (dot-id cell-name) ";\n")))
+    (.append sb "  \"end\" [shape=doublecircle];\n")
+    (.append sb "  \"error\" [shape=doubleoctagon color=red];\n")
+    (.append sb "  \"halt\" [shape=octagon color=orange];\n")
     ;; Add edges
     (doseq [[from edge-def] edges]
       (if (keyword? edge-def)
-        (.append sb (str "  " (name from) " -> " (name edge-def) ";\n"))
+        (.append sb (str "  " (dot-id from) " -> " (dot-id edge-def) ";\n"))
         (doseq [[label target] edge-def]
-          (.append sb (str "  " (name from) " -> " (name target)
+          (.append sb (str "  " (dot-id from) " -> " (dot-id target)
                        " [label=\"" (name label) "\"];\n")))))
     (.append sb "}\n")
     (str sb)))
+
+(defn- generate-test-input
+  "Generates test input data from a cell's input schema using Malli generators."
+  [cell]
+  (try
+    (mg/generate (m/schema (get-in cell [:schema :input])) {:size 3 :seed 42})
+    (catch Exception _
+      {})))
 
 (defn workflow-status
   "Reports implementation status across all cells in a manifest.
@@ -72,7 +88,8 @@
                       cell    (cell/get-cell cell-id)]
                   (if cell
                     (try
-                      (let [result (test-cell cell-id {:input {}
+                      (let [input  (generate-test-input cell)
+                            result (test-cell cell-id {:input     input
                                                        :resources {}})]
                         {:id     cell-id
                          :name   cell-name

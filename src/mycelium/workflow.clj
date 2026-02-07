@@ -1,9 +1,10 @@
 (ns mycelium.workflow
   "Workflow DSL compiler: transforms workflow definitions into Maestro FSM specs."
-  (:require [mycelium.cell :as cell]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
+            [mycelium.cell :as cell]
             [mycelium.schema :as schema]
-            [maestro.core :as fsm]
-            [malli.core :as m]))
+            [maestro.core :as fsm]))
 
 ;; ===== State ID resolution =====
 
@@ -35,17 +36,6 @@
           edges)))
 
 ;; ===== Validation =====
-
-(defn- collect-edge-targets
-  "Returns all cell-name targets mentioned in edges (excluding :end, :error, :halt)."
-  [edges-map]
-  (into #{}
-        (comp (mapcat (fn [[_ edge-def]]
-                        (if (keyword? edge-def)
-                          [edge-def]
-                          (vals edge-def))))
-              (remove #{:end :error :halt}))
-        edges-map))
 
 (defn- validate-cells-exist!
   "Checks all cells referenced in :cells exist in the registry."
@@ -87,13 +77,14 @@
                            (let [neighbors (get adjacency node #{})]
                              (recur (into queue neighbors)
                                     (conj visited node)))))))]
-    (let [unreachable (clojure.set/difference cell-names reachable)]
+    (let [unreachable (set/difference cell-names reachable)]
       (when (seq unreachable)
         (throw (ex-info (str "Unreachable cells: " unreachable)
                         {:unreachable unreachable}))))))
 
 (defn- validate-transition-coverage!
-  "Checks that all declared cell transitions are covered by edges."
+  "Checks that all declared cell transitions are covered by edges,
+   and that all edge keys match declared transitions."
   [edges-map cells-map]
   (doseq [[cell-name cell-id] cells-map]
     (let [cell       (cell/get-cell! cell-id)
@@ -103,7 +94,7 @@
                        (:transitions cell)
                        (set (keys edge-def)))
           declared   (:transitions cell)
-          uncovered  (clojure.set/difference declared covered)]
+          uncovered  (set/difference declared covered)]
       (when (seq uncovered)
         (throw (ex-info (str "Cell " cell-name " (" cell-id ") declares transition(s) "
                              uncovered " not covered by edges")
@@ -111,7 +102,18 @@
                          :cell-id   cell-id
                          :uncovered uncovered
                          :declared  declared
-                         :covered   covered}))))))
+                         :covered   covered})))
+      ;; Check for dead edges (edge keys that don't match any declared transition)
+      (when (map? edge-def)
+        (let [dead-edges (set/difference covered declared)]
+          (when (seq dead-edges)
+            (throw (ex-info (str "Cell " cell-name " (" cell-id ") has edge(s) "
+                                 dead-edges " that don't match any declared transition "
+                                 declared)
+                            {:cell-name  cell-name
+                             :cell-id    cell-id
+                             :dead-edges dead-edges
+                             :declared   declared}))))))))
 
 (defn- validate-schema-chain!
   "Walks all paths from :start, accumulating output keys.
@@ -135,7 +137,7 @@
                    (let [cell-id     (get cells-map cell-name)
                          input-keys  (get-input-keys cell-id)
                          missing     (when input-keys
-                                       (clojure.set/difference input-keys available-keys))]
+                                       (set/difference input-keys available-keys))]
                      (when (seq missing)
                        (swap! errors conj
                               {:cell-name     cell-name
@@ -162,7 +164,7 @@
         (visit target initial-keys #{:start})))
     (when (seq @errors)
       (let [msg (str "Schema chain error: "
-                     (clojure.string/join
+                     (str/join
                       "; "
                       (map (fn [{:keys [cell-name cell-id missing-keys available-keys]}]
                              (str cell-id " at " cell-name

@@ -1,6 +1,7 @@
 (ns mycelium.manifest
   "Manifest loading, validation, cell-brief generation, and workflow construction."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -55,6 +56,49 @@
       (when-not (contains? valid-names target)
         (throw (ex-info (str "Invalid edge target " target " from " from)
                         {:from from :target target :valid valid-names})))))
+  ;; Validate all cells have edges defined
+  (doseq [[cell-name _] cells]
+    (when-not (get edges cell-name)
+      (throw (ex-info (str "Cell " cell-name " has no edges defined")
+                      {:cell-name cell-name}))))
+  ;; Validate edge keys match declared transitions
+  (doseq [[cell-name cell-def] cells]
+    (let [edge-def    (get edges cell-name)
+          declared    (:transitions cell-def)
+          edge-keys   (when (map? edge-def) (set (keys edge-def)))]
+      (when edge-keys
+        (let [uncovered (set/difference declared edge-keys)]
+          (when (seq uncovered)
+            (throw (ex-info (str "Cell " cell-name " declares transition(s) "
+                                 uncovered " not covered by edges")
+                            {:cell-name cell-name :uncovered uncovered}))))
+        (let [dead (set/difference edge-keys declared)]
+          (when (seq dead)
+            (throw (ex-info (str "Cell " cell-name " has edge(s) " dead
+                                 " that don't match any declared transition " declared)
+                            {:cell-name cell-name :dead dead})))))))
+  ;; Validate reachability (BFS from :start)
+  (let [cell-names (set (keys cells))
+        adjacency  (into {}
+                         (map (fn [[from edge-def]]
+                                [from (if (keyword? edge-def)
+                                        #{edge-def}
+                                        (set (vals edge-def)))]))
+                         edges)
+        reachable  (loop [queue   (conj clojure.lang.PersistentQueue/EMPTY :start)
+                          visited #{}]
+                     (if (empty? queue)
+                       visited
+                       (let [node  (peek queue)
+                             queue (pop queue)]
+                         (if (visited node)
+                           (recur queue visited)
+                           (recur (into queue (get adjacency node #{}))
+                                  (conj visited node))))))
+        unreachable (set/difference cell-names reachable)]
+    (when (seq unreachable)
+      (throw (ex-info (str "Unreachable cells in manifest: " unreachable)
+                      {:unreachable unreachable}))))
   manifest)
 
 ;; ===== Manifest loading =====
@@ -100,7 +144,7 @@
                          "\n## Example Data\n\n"
                          "Example input:\n  " (pr-str input-ex) "\n\n"
                          "Example output:\n  " (pr-str (merge output-ex
-                                                              {:mycelium/transition (first transitions)})) "\n"
+                                                              {:mycelium/transition (first (sort transitions))})) "\n"
                          "\n## Rules\n"
                          "- Handler signature: (fn [resources data] -> data)\n"
                          "- MUST return data with :mycelium/transition set to one of: "
@@ -131,7 +175,7 @@
                                          {:id          id
                                           :handler     (fn [_ data]
                                                          (assoc data :mycelium/transition
-                                                                (first transitions)))
+                                                                (first (sort transitions))))
                                           :schema      schema
                                           :transitions transitions
                                           :requires    (or requires [])

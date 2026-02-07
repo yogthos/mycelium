@@ -176,3 +176,14 @@
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
             :edges {:start {:success :nonexistent-cell, :failure :error}}})))))
+
+;; ===== Dead edge detection =====
+
+(deftest dead-edge-detected-test
+  (testing "Edge key that doesn't match any declared transition is rejected"
+    (register-cells!)
+    ;; cell-a declares #{:success :failure}, edge has :typo which is not a declared transition
+    (is (thrown-with-msg? Exception #"don't match"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :edges {:start {:success :end, :failure :error, :typo :error}}})))))

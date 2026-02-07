@@ -53,6 +53,16 @@
           dot (dev/workflow->dot manifest)]
       (is (string? dot))
       (is (re-find #"digraph" dot))
-      (is (re-find #"start" dot))
-      (is (re-find #"process" dot))
-      (is (re-find #"success" dot)))))
+      (is (re-find #"\"start\"" dot))
+      (is (re-find #"\"process\"" dot))
+      (is (re-find #"success" dot))
+      (is (re-find #"\"halt\"" dot)))))
+
+(deftest workflow-to-dot-handles-hyphens-test
+  (testing "workflow->dot quotes identifiers with hyphens"
+    (let [manifest {:cells {:start {:id :test/a}
+                            :fetch-profile {:id :test/b}}
+                    :edges {:start {:ok :fetch-profile}
+                            :fetch-profile {:done :end}}}
+          dot (dev/workflow->dot manifest)]
+      (is (re-find #"\"fetch-profile\"" dot)))))
