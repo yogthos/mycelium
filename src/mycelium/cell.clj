@@ -3,12 +3,21 @@
   (:require [clojure.set]
             [malli.core :as m]))
 
-(defonce ^:private registry (atom {}))
+(defmulti cell-spec
+  "Multimethod-backed cell registry. Dispatches on cell-id keyword,
+   returns the full cell spec map or nil for unknown cells."
+  identity)
+
+(defmethod cell-spec :default [_] nil)
+
+(defonce ^:private schema-overrides (atom {}))
 
 (defn clear-registry!
   "Removes all cells from the registry."
   []
-  (reset! registry {}))
+  (doseq [k (keys (dissoc (methods cell-spec) :default))]
+    (remove-method cell-spec k))
+  (reset! schema-overrides {}))
 
 (defn- validate-schema! [schema label]
   (try
@@ -70,18 +79,21 @@
        (validate-schema! (:input schema) (str id " :input")))
      (when (:output schema)
        (validate-output-schema! (:output schema) transitions (str id " :output"))))
-   (swap! registry
-          (fn [reg]
-            (when (and (not replace?) (get reg id))
-              (throw (ex-info (str "Cell " id " already registered")
-                              {:id id})))
-            (assoc reg id spec)))
+   (when (and (not replace?) (cell-spec id))
+     (throw (ex-info (str "Cell " id " already registered")
+                     {:id id})))
+   (.addMethod cell-spec id (constantly spec))
+   (swap! schema-overrides dissoc id)
    spec))
 
 (defn get-cell
   "Returns the cell spec for the given id, or nil if not found."
   [id]
-  (get @registry id))
+  (let [spec (cell-spec id)]
+    (when spec
+      (if-let [overrides (get @schema-overrides id)]
+        (assoc spec :schema overrides)
+        spec))))
 
 (defn get-cell!
   "Returns the cell spec for the given id, or throws if not found."
@@ -95,21 +107,21 @@
    Validates that the schema is well-formed Malli before updating.
    Throws if the cell is not found or the schema is invalid."
   [cell-id schema]
-  (when-not (get @registry cell-id)
+  (when-not (cell-spec cell-id)
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
-  (let [transitions (:transitions (get @registry cell-id))]
+  (let [transitions (:transitions (cell-spec cell-id))]
     (when (:input schema)
       (validate-schema! (:input schema) (str cell-id " :input")))
     (when (:output schema)
       (validate-output-schema! (:output schema) transitions (str cell-id " :output"))))
-  (swap! registry assoc-in [cell-id :schema] schema)
+  (swap! schema-overrides assoc cell-id schema)
   schema)
 
 (defn list-cells
   "Returns a seq of all registered cell IDs."
   []
-  (keys @registry))
+  (keys (dissoc (methods cell-spec) :default)))
 
 (defmacro defcell
   "Registers a cell and defines its handler.

@@ -190,3 +190,21 @@
                                      :not-found [:map [:error :string]]}})
     (let [spec (cell/get-cell :test/set-map-out)]
       (is (map? (get-in spec [:schema :output]))))))
+
+(deftest register-replace-clears-schema-override-test
+  (testing "Re-registering a cell with :replace? clears any schema override"
+    (cell/register-cell!
+     {:id          :test/override-clear
+      :handler     (fn [_ d] d)
+      :transitions #{:done}})
+    (cell/set-cell-schema! :test/override-clear
+                           {:input  [:map [:x :int]]
+                            :output [:map [:y :int]]})
+    (is (some? (:schema (cell/get-cell :test/override-clear))))
+    ;; Re-register with :replace? — should clear the schema override
+    (cell/register-cell!
+     {:id          :test/override-clear
+      :handler     (fn [_ d] d)
+      :transitions #{:done}}
+     {:replace? true})
+    (is (nil? (:schema (cell/get-cell :test/override-clear))))))
