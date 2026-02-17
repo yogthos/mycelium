@@ -221,18 +221,20 @@
 (defn manifest->workflow
   "Converts a manifest into a workflow definition map.
    For each cell in the manifest:
-   - If not already registered, registers a stub handler with the manifest schema.
-   - If already registered, applies the manifest schema via `set-cell-schema!`.
-   The manifest is the single source of truth for schemas.
+   - If not already registered, registers a stub handler with the full manifest spec.
+   - If already registered, applies manifest metadata via `set-cell-meta!`.
+   The manifest is the single source of truth for schemas, transitions, and requires.
    Returns {:cells ... :edges ...} suitable for `workflow/compile-workflow`."
   [{:keys [cells edges] :as manifest}]
   (let [cell-ids (into {}
                        (map (fn [[cell-name cell-def]]
                               (let [{:keys [id schema transitions requires]} cell-def]
                                 (if (cell/get-cell id)
-                                  ;; Cell already registered — apply manifest schema
-                                  (cell/set-cell-schema! id schema)
-                                  ;; Not registered — register stub handler with schema
+                                  ;; Cell already registered — apply manifest metadata
+                                  (cell/set-cell-meta! id {:schema      schema
+                                                           :transitions transitions
+                                                           :requires    (or requires [])})
+                                  ;; Not registered — register stub handler with full spec
                                   (cell/register-cell!
                                    {:id          id
                                     :handler     (fn [_ data]

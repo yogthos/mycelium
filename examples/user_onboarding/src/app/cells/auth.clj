@@ -3,8 +3,7 @@
             [app.db :as db]))
 
 (cell/defcell :auth/parse-request
-  {:doc         "Extract and validate credentials from the HTTP request"
-   :transitions #{:success :failure}}
+  {:doc "Extract and validate credentials from the HTTP request"}
   [_resources data]
   (let [body    (get-in data [:http-request :body])
         ;; Support both string keys (raw Ring) and keyword keys (Muuntaja)
@@ -21,9 +20,7 @@
              :mycelium/transition :failure))))
 
 (cell/defcell :auth/validate-session
-  {:doc         "Check credentials against the session store"
-   :requires    [:db]
-   :transitions #{:authorized :unauthorized}}
+  {:doc "Check credentials against the session store"}
   [{:keys [db]} data]
   (let [session (db/get-session db (:auth-token data))
         valid?  (and session (= 1 (:valid session)))]
@@ -39,8 +36,7 @@
              :mycelium/transition :unauthorized))))
 
 (cell/defcell :auth/extract-session
-  {:doc         "Extract auth token from query parameters"
-   :transitions #{:success :failure}}
+  {:doc "Extract auth token from query parameters"}
   [_resources data]
   (let [qp    (get-in data [:http-request :query-params])
         token (or (get qp :token) (get qp "token"))]
@@ -54,8 +50,7 @@
              :mycelium/transition :failure))))
 
 (cell/defcell :auth/extract-cookie-session
-  {:doc         "Extract auth token from session-token cookie"
-   :transitions #{:success :failure}}
+  {:doc "Extract auth token from session-token cookie"}
   [_resources data]
   (let [token (get-in data [:http-request :cookies "session-token" :value])]
     (if token

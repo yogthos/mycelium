@@ -41,7 +41,7 @@
             :transitions #{:done}})))))
 
 (deftest reject-empty-transitions-test
-  (testing "Reject empty transitions set → throws"
+  (testing "Reject explicitly empty transitions set → throws"
     (is (thrown-with-msg? Exception #"transitions"
           (cell/register-cell!
            {:id          :test/no-trans
@@ -49,6 +49,16 @@
             :schema      {:input  [:map [:x :int]]
                           :output [:map [:y :int]]}
             :transitions #{}})))))
+
+(deftest register-without-transitions-test
+  (testing "Cell registered without :transitions is OK and retrievable"
+    (cell/register-cell!
+     {:id      :test/no-trans-ok
+      :handler (fn [_ d] d)})
+    (let [spec (cell/get-cell :test/no-trans-ok)]
+      (is (some? spec))
+      (is (= :test/no-trans-ok (:id spec)))
+      (is (nil? (:transitions spec))))))
 
 (deftest defcell-macro-test
   (testing "defcell macro registers and creates working handler (without schema)"
@@ -208,3 +218,61 @@
       :transitions #{:done}}
      {:replace? true})
     (is (nil? (:schema (cell/get-cell :test/override-clear))))))
+
+;; ===== set-cell-meta! tests =====
+
+(deftest set-cell-meta-test
+  (testing "set-cell-meta! sets schema, transitions, and requires on a cell"
+    (cell/register-cell!
+     {:id      :test/meta-cell
+      :handler (fn [_ d] d)})
+    (cell/set-cell-meta! :test/meta-cell
+                         {:schema      {:input  [:map [:x :int]]
+                                        :output [:map [:y :int]]}
+                          :transitions #{:done}
+                          :requires    [:db]})
+    (let [spec (cell/get-cell :test/meta-cell)]
+      (is (= [:map [:x :int]] (get-in spec [:schema :input])))
+      (is (= [:map [:y :int]] (get-in spec [:schema :output])))
+      (is (= #{:done} (:transitions spec)))
+      (is (= [:db] (:requires spec))))))
+
+(deftest set-cell-meta-clears-on-replace-test
+  (testing "Re-registering a cell with :replace? clears all overrides (not just schema)"
+    (cell/register-cell!
+     {:id      :test/meta-replace
+      :handler (fn [_ d] d)})
+    (cell/set-cell-meta! :test/meta-replace
+                         {:schema      {:input [:map [:x :int]] :output [:map [:y :int]]}
+                          :transitions #{:done}
+                          :requires    [:db]})
+    (is (= #{:done} (:transitions (cell/get-cell :test/meta-replace))))
+    ;; Re-register with :replace? — should clear all overrides
+    (cell/register-cell!
+     {:id      :test/meta-replace
+      :handler (fn [_ d] d)}
+     {:replace? true})
+    (let [spec (cell/get-cell :test/meta-replace)]
+      (is (nil? (:schema spec)))
+      (is (nil? (:transitions spec)))
+      (is (nil? (:requires spec))))))
+
+(deftest set-cell-meta-validates-transitions-test
+  (testing "set-cell-meta! rejects empty transitions"
+    (cell/register-cell!
+     {:id      :test/meta-bad-trans
+      :handler (fn [_ d] d)})
+    (is (thrown-with-msg? Exception #"transitions"
+          (cell/set-cell-meta! :test/meta-bad-trans
+                               {:transitions #{}})))))
+
+(deftest set-cell-meta-validates-schema-test
+  (testing "set-cell-meta! rejects invalid Malli schema"
+    (cell/register-cell!
+     {:id      :test/meta-bad-schema
+      :handler (fn [_ d] d)})
+    (is (thrown? Exception
+          (cell/set-cell-meta! :test/meta-bad-schema
+                               {:schema {:input [:not-a-real-schema-type]
+                                         :output [:map [:y :int]]}
+                                :transitions #{:done}})))))

@@ -88,6 +88,10 @@
   [edges-map cells-map]
   (doseq [[cell-name cell-id] cells-map]
     (let [cell       (cell/get-cell! cell-id)
+          _          (when (or (nil? (:transitions cell)) (empty? (:transitions cell)))
+                       (throw (ex-info (str "Cell " cell-name " (" cell-id
+                                            ") has no declared transitions")
+                                       {:cell-name cell-name :cell-id cell-id})))
           edge-def   (get edges-map cell-name)
           covered    (if (keyword? edge-def)
                        ;; Unconditional edge covers all transitions
