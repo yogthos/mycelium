@@ -192,6 +192,16 @@
              (schema/output-schema-for-transition cell :not-found)))
       (is (nil? (schema/output-schema-for-transition cell :unknown))))))
 
+(deftest output-schema-for-transition-keyword-test
+  (testing "Returns bare keyword schema (e.g. :map) as-is"
+    (defmethod cell/cell-spec :test/kw-out [_]
+      {:id          :test/kw-out
+       :handler     (fn [_ data] data)
+       :schema      {:input :map :output :map}
+       :transitions #{:ok}})
+    (let [cell (cell/get-cell! :test/kw-out)]
+      (is (= :map (schema/output-schema-for-transition cell :ok))))))
+
 ;; ===== Per-transition validate-output tests =====
 
 (defn- register-per-transition-cell! []

@@ -136,7 +136,7 @@
 (defn workflow-status
   "Reports implementation status across all cells in a manifest.
    Returns a map with :total, :implemented, :passing, :failing, :pending, :cells."
-  [{:keys [cells] :as manifest}]
+  [{:keys [cells]}]
   (let [cell-statuses
         (mapv (fn [[cell-name cell-def]]
                 (let [cell-id (:id cell-def)

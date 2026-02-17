@@ -30,7 +30,8 @@
     (cond
       (nil? output)    nil
       (vector? output) output
-      (map? output)    (get output transition))))
+      (map? output)    (get output transition)
+      :else            output)))
 
 (defn validate-output
   "Validates data against the cell's output schema and transition.
