@@ -65,12 +65,13 @@
 (deftest progress-reflects-status-test
   (testing "progress reflects current status"
     ;; Register one cell, leave the other unregistered
-    (cell/defcell :test/step-a
-      {:schema {:input [:map [:x :int]]
-                :output [:map [:y :int]]}
-       :transitions #{:next}}
-      [_ data]
-      (assoc data :y (inc (:x data)) :mycelium/transition :next))
+    (defmethod cell/cell-spec :test/step-a [_]
+      {:id          :test/step-a
+       :handler     (fn [_ data]
+                      (assoc data :y (inc (:x data)) :mycelium/transition :next))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:next}})
 
     (let [report (orchestrate/progress test-manifest)]
       (is (string? report))

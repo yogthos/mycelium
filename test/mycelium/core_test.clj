@@ -9,12 +9,13 @@
 
 (deftest run-workflow-end-to-end-test
   (testing "run-workflow convenience works end-to-end"
-    (mycelium/defcell :core/adder
-      {:schema {:input [:map [:x :int]]
-                :output [:map [:result :int]]}
-       :transitions #{:done}}
-      [_ data]
-      (assoc data :result (+ (:x data) 100) :mycelium/transition :done))
+    (defmethod cell/cell-spec :core/adder [_]
+      {:id          :core/adder
+       :handler     (fn [_ data]
+                      (assoc data :result (+ (:x data) 100) :mycelium/transition :done))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:result :int]]}
+       :transitions #{:done}})
 
     (let [result (mycelium/run-workflow
                   {:cells {:start :core/adder}
@@ -27,7 +28,7 @@
 
 (deftest re-exported-fns-test
   (testing "Re-exported functions accessible from mycelium.core"
-    (is (:macro (meta #'mycelium/defcell)))
+    (is (= cell/cell-spec mycelium/cell-spec))
     (is (fn? mycelium/compile-workflow))
     (is (fn? mycelium/workflow->cell))
     (is (fn? mycelium/load-manifest))

@@ -8,12 +8,12 @@
 
 ;; --- Helper: register a test cell ---
 (defn- register-test-cell! []
-  (cell/register-cell!
-   {:id          :test/cell-a
-    :handler     (fn [_ data] (assoc data :y 42 :mycelium/transition :success))
-    :schema      {:input  [:map [:x :int]]
-                  :output [:map [:y :int]]}
-    :transitions #{:success :failure}}))
+  (defmethod cell/cell-spec :test/cell-a [_]
+    {:id          :test/cell-a
+     :handler     (fn [_ data] (assoc data :y 42 :mycelium/transition :success))
+     :schema      {:input  [:map [:x :int]]
+                   :output [:map [:y :int]]}
+     :transitions #{:success :failure}}))
 
 ;; ===== validate-input tests =====
 
@@ -162,10 +162,10 @@
 
 (deftest output-schema-for-transition-nil-test
   (testing "Returns nil when cell has no output schema"
-    (cell/register-cell!
-     {:id          :test/no-out
-      :handler     (fn [_ data] data)
-      :transitions #{:ok}})
+    (defmethod cell/cell-spec :test/no-out [_]
+      {:id          :test/no-out
+       :handler     (fn [_ data] data)
+       :transitions #{:ok}})
     (let [cell (cell/get-cell! :test/no-out)]
       (is (nil? (schema/output-schema-for-transition cell :ok))))))
 
@@ -178,13 +178,13 @@
 
 (deftest output-schema-for-transition-map-test
   (testing "Returns per-transition schema from map"
-    (cell/register-cell!
-     {:id          :test/per-trans
-      :handler     (fn [_ data] data)
-      :schema      {:input  [:map [:x :int]]
-                    :output {:found     [:map [:profile [:map [:name :string]]]]
-                             :not-found [:map [:error-message :string]]}}
-      :transitions #{:found :not-found}})
+    (defmethod cell/cell-spec :test/per-trans [_]
+      {:id          :test/per-trans
+       :handler     (fn [_ data] data)
+       :schema      {:input  [:map [:x :int]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}
+       :transitions #{:found :not-found}})
     (let [cell (cell/get-cell! :test/per-trans)]
       (is (= [:map [:profile [:map [:name :string]]]]
              (schema/output-schema-for-transition cell :found)))
@@ -195,13 +195,13 @@
 ;; ===== Per-transition validate-output tests =====
 
 (defn- register-per-transition-cell! []
-  (cell/register-cell!
-   {:id          :test/pt-cell
-    :handler     (fn [_ data] data)
-    :schema      {:input  [:map [:x :int]]
-                  :output {:success   [:map [:y :int]]
-                           :failure   [:map [:error-message :string]]}}
-    :transitions #{:success :failure}}))
+  (defmethod cell/cell-spec :test/pt-cell [_]
+    {:id          :test/pt-cell
+     :handler     (fn [_ data] data)
+     :schema      {:input  [:map [:x :int]]
+                   :output {:success   [:map [:y :int]]
+                            :failure   [:map [:error-message :string]]}}
+     :transitions #{:success :failure}}))
 
 (deftest validate-output-per-transition-passes-test
   (testing "Per-transition schema passes correct data for matching transition"

@@ -235,15 +235,16 @@
                                                            :transitions transitions
                                                            :requires    (or requires [])})
                                   ;; Not registered — register stub handler with full spec
-                                  (cell/register-cell!
-                                   {:id          id
-                                    :handler     (fn [_ data]
-                                                   (assoc data :mycelium/transition
-                                                          (first (sort transitions))))
-                                    :schema      schema
-                                    :transitions transitions
-                                    :requires    (or requires [])
-                                    :doc         (:doc cell-def)}))
+                                  (let [stub {:id          id
+                                              :handler     (fn [_ data]
+                                                             (assoc data :mycelium/transition
+                                                                    (first (sort transitions))))
+                                              :schema      schema
+                                              :transitions transitions
+                                              :requires    (or requires [])
+                                              :doc         (:doc cell-def)}]
+                                    (.addMethod cell/cell-spec id (constantly stub))
+                                    stub))
                                 [cell-name id])))
                        cells)]
     {:cells cell-ids

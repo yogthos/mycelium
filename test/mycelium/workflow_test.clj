@@ -8,24 +8,24 @@
 
 ;; --- Helpers ---
 (defn- register-cells! []
-  (cell/register-cell!
-   {:id :test/cell-a
-    :handler (fn [_ data] (assoc data :a-done true :mycelium/transition :success))
-    :schema {:input [:map [:x :int]]
-             :output [:map [:a-done :boolean]]}
-    :transitions #{:success :failure}})
-  (cell/register-cell!
-   {:id :test/cell-b
-    :handler (fn [_ data] (assoc data :b-done true :mycelium/transition :success))
-    :schema {:input [:map [:a-done :boolean]]
-             :output [:map [:b-done :boolean]]}
-    :transitions #{:success}})
-  (cell/register-cell!
-   {:id :test/cell-c
-    :handler (fn [_ data] (assoc data :c-done true :mycelium/transition :done))
-    :schema {:input [:map [:b-done :boolean]]
-             :output [:map [:c-done :boolean]]}
-    :transitions #{:done}}))
+  (defmethod cell/cell-spec :test/cell-a [_]
+    {:id :test/cell-a
+     :handler (fn [_ data] (assoc data :a-done true :mycelium/transition :success))
+     :schema {:input [:map [:x :int]]
+              :output [:map [:a-done :boolean]]}
+     :transitions #{:success :failure}})
+  (defmethod cell/cell-spec :test/cell-b [_]
+    {:id :test/cell-b
+     :handler (fn [_ data] (assoc data :b-done true :mycelium/transition :success))
+     :schema {:input [:map [:a-done :boolean]]
+              :output [:map [:b-done :boolean]]}
+     :transitions #{:success}})
+  (defmethod cell/cell-spec :test/cell-c [_]
+    {:id :test/cell-c
+     :handler (fn [_ data] (assoc data :c-done true :mycelium/transition :done))
+     :schema {:input [:map [:b-done :boolean]]
+              :output [:map [:c-done :boolean]]}
+     :transitions #{:done}}))
 
 ;; ===== resolve-state-id tests =====
 
@@ -127,18 +127,18 @@
 
 (deftest schema-chain-catches-missing-key-test
   (testing "Schema chain validation catches missing upstream key with detailed error"
-    (cell/register-cell!
-     {:id :test/needs-z
-      :handler (fn [_ data] (assoc data :w true :mycelium/transition :ok))
-      :schema {:input [:map [:z :string]]
-               :output [:map [:w :boolean]]}
-      :transitions #{:ok}})
-    (cell/register-cell!
-     {:id :test/produces-a
-      :handler (fn [_ data] (assoc data :a-val 1 :mycelium/transition :next))
-      :schema {:input [:map [:x :int]]
-               :output [:map [:a-val :int]]}
-      :transitions #{:next}})
+    (defmethod cell/cell-spec :test/needs-z [_]
+      {:id :test/needs-z
+       :handler (fn [_ data] (assoc data :w true :mycelium/transition :ok))
+       :schema {:input [:map [:z :string]]
+                :output [:map [:w :boolean]]}
+       :transitions #{:ok}})
+    (defmethod cell/cell-spec :test/produces-a [_]
+      {:id :test/produces-a
+       :handler (fn [_ data] (assoc data :a-val 1 :mycelium/transition :next))
+       :schema {:input [:map [:x :int]]
+                :output [:map [:a-val :int]]}
+       :transitions #{:next}})
     (is (thrown-with-msg? Exception #"[Ss]chema chain"
           (wf/compile-workflow
            {:cells {:start  :test/produces-a
@@ -152,12 +152,12 @@
   (testing "Branching workflow compiles correctly"
     (register-cells!)
     ;; Register a cell compatible with branch from :start (needs :a-done from cell-a output)
-    (cell/register-cell!
-     {:id :test/cell-d
-      :handler (fn [_ data] (assoc data :d-done true :mycelium/transition :done))
-      :schema {:input [:map [:a-done :boolean]]
-               :output [:map [:d-done :boolean]]}
-      :transitions #{:done}})
+    (defmethod cell/cell-spec :test/cell-d [_]
+      {:id :test/cell-d
+       :handler (fn [_ data] (assoc data :d-done true :mycelium/transition :done))
+       :schema {:input [:map [:a-done :boolean]]
+                :output [:map [:d-done :boolean]]}
+       :transitions #{:done}})
     (let [workflow {:cells {:start  :test/cell-a
                             :path-b :test/cell-b
                             :path-d :test/cell-d}
@@ -191,28 +191,28 @@
 ;; ===== Per-transition schema chain validation =====
 
 (defn- register-per-transition-cells! []
-  (cell/register-cell!
-   {:id :test/lookup
-    :handler (fn [_ data]
-               (if (= (:id data) "alice")
-                 (assoc data :profile {:name "Alice"} :mycelium/transition :found)
-                 (assoc data :error-message "Not found" :mycelium/transition :not-found)))
-    :schema {:input [:map [:id :string]]
-             :output {:found     [:map [:profile [:map [:name :string]]]]
-                      :not-found [:map [:error-message :string]]}}
-    :transitions #{:found :not-found}})
-  (cell/register-cell!
-   {:id :test/render-profile
-    :handler (fn [_ data] (assoc data :html "ok" :mycelium/transition :done))
-    :schema {:input [:map [:profile [:map [:name :string]]]]
-             :output [:map [:html :string]]}
-    :transitions #{:done}})
-  (cell/register-cell!
-   {:id :test/render-error
-    :handler (fn [_ data] (assoc data :html "error" :mycelium/transition :done))
-    :schema {:input [:map [:error-message :string]]
-             :output [:map [:html :string]]}
-    :transitions #{:done}}))
+  (defmethod cell/cell-spec :test/lookup [_]
+    {:id :test/lookup
+     :handler (fn [_ data]
+                (if (= (:id data) "alice")
+                  (assoc data :profile {:name "Alice"} :mycelium/transition :found)
+                  (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+     :schema {:input [:map [:id :string]]
+              :output {:found     [:map [:profile [:map [:name :string]]]]
+                       :not-found [:map [:error-message :string]]}}
+     :transitions #{:found :not-found}})
+  (defmethod cell/cell-spec :test/render-profile [_]
+    {:id :test/render-profile
+     :handler (fn [_ data] (assoc data :html "ok" :mycelium/transition :done))
+     :schema {:input [:map [:profile [:map [:name :string]]]]
+              :output [:map [:html :string]]}
+     :transitions #{:done}})
+  (defmethod cell/cell-spec :test/render-error [_]
+    {:id :test/render-error
+     :handler (fn [_ data] (assoc data :html "error" :mycelium/transition :done))
+     :schema {:input [:map [:error-message :string]]
+              :output [:map [:html :string]]}
+     :transitions #{:done}}))
 
 (deftest per-transition-schema-chain-valid-test
   (testing "Per-transition schemas — valid workflow compiles"

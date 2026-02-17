@@ -50,4 +50,6 @@
    `workflow`  - workflow definition map {:cells ... :edges ...}
    `schema`    - {:input [...] :output [...]} for the cell"
   [cell-id workflow schema]
-  (cell/register-cell! (workflow->cell cell-id workflow schema)))
+  (let [spec (workflow->cell cell-id workflow schema)]
+    (.addMethod cell/cell-spec cell-id (constantly spec))
+    spec))

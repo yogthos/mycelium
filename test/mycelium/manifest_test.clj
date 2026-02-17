@@ -78,9 +78,9 @@
 (deftest manifest-applies-schema-to-existing-cells-test
   (testing "manifest->workflow applies manifest metadata to pre-registered cells (without transitions)"
     ;; Register a cell WITHOUT :transitions — manifest is the source of truth
-    (cell/register-cell!
-     {:id      :test/parse
-      :handler (fn [_ data] (assoc data :y 1 :mycelium/transition :success))})
+    (defmethod cell/cell-spec :test/parse [_]
+      {:id      :test/parse
+       :handler (fn [_ data] (assoc data :y 1 :mycelium/transition :success))})
     (is (nil? (:schema (cell/get-cell :test/parse))))
     (is (nil? (:transitions (cell/get-cell :test/parse))))
 

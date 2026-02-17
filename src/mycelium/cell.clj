@@ -1,5 +1,5 @@
 (ns mycelium.cell
-  "Cell registry and defcell macro for Mycelium."
+  "Cell registry for Mycelium. Cells are registered via `defmethod cell-spec`."
   (:require [clojure.set]
             [malli.core :as m]))
 
@@ -55,36 +55,6 @@
 
     :else
     (validate-schema! output-schema label)))
-
-(defn register-cell!
-  "Validates and registers a cell spec in the global registry.
-   Cell spec shape:
-     {:id :ns/name, :handler fn, :schema {:input malli :output malli},
-      :transitions #{:kw ...}, :requires [:resource ...], :async? bool, :doc \"\"}
-   Schema and transitions are optional at registration time — the manifest is the
-   single source of truth and will attach them via `set-cell-meta!`.
-   Options:
-     :replace? - if true, allows overwriting an existing cell (default false)"
-  ([spec] (register-cell! spec {}))
-  ([{:keys [id handler schema transitions] :as spec} {:keys [replace?]}]
-   (when-not id
-     (throw (ex-info "Cell spec missing :id" {:spec spec})))
-   (when-not handler
-     (throw (ex-info "Cell spec missing :handler" {:id id})))
-   (when (and (some? transitions) (empty? transitions))
-     (throw (ex-info (str "Cell " id " must declare non-empty transitions")
-                     {:id id})))
-   (when schema
-     (when (:input schema)
-       (validate-schema! (:input schema) (str id " :input")))
-     (when (:output schema)
-       (validate-output-schema! (:output schema) transitions (str id " :output"))))
-   (when (and (not replace?) (cell-spec id))
-     (throw (ex-info (str "Cell " id " already registered")
-                     {:id id})))
-   (.addMethod cell-spec id (constantly spec))
-   (swap! cell-overrides dissoc id)
-   spec))
 
 (defn get-cell
   "Returns the cell spec for the given id, or nil if not found."
@@ -148,20 +118,3 @@
   []
   (keys (dissoc (methods cell-spec) :default)))
 
-(defmacro defcell
-  "Registers a cell and defines its handler.
-   Usage:
-     (defcell :ns/name
-       {:doc \"...\" :transitions #{...}}
-       [resources data]
-       body...)
-
-   Schema and transitions are provided by the manifest via `set-cell-meta!`, not in defcell.
-   For async cells, add :async? true to opts and use [resources data callback error-callback]."
-  [id opts bindings & body]
-  `(let [handler# (fn ~bindings ~@body)]
-     (register-cell!
-      (merge {:id      ~id
-              :handler handler#}
-             ~opts)
-      {:replace? true})))
