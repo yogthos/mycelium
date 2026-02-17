@@ -11,13 +11,13 @@
 
 (deftest workflow-to-cell-produces-valid-spec-test
   (testing "workflow->cell produces valid cell spec with :success/:failure transitions"
-    (cell/defcell :comp/step1
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :y (* 2 (:x data)) :mycelium/transition :done))
-    (cell/set-cell-schema! :comp/step1
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :comp/step1 [_]
+      {:id          :comp/step1
+       :handler     (fn [_ data]
+                      (assoc data :y (* 2 (:x data)) :mycelium/transition :done))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:done}})
 
     (let [child-workflow {:cells {:start :comp/step1}
                           :edges {:start {:done :end}}}
@@ -33,13 +33,13 @@
 
 (deftest child-workflow-runs-inside-parent-test
   (testing "Child workflow runs inside parent, data flows through"
-    (cell/defcell :comp/doubler
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :doubled (* 2 (:x data)) :mycelium/transition :done))
-    (cell/set-cell-schema! :comp/doubler
-                           {:input [:map [:x :int]]
-                            :output [:map [:doubled :int]]})
+    (defmethod cell/cell-spec :comp/doubler [_]
+      {:id          :comp/doubler
+       :handler     (fn [_ data]
+                      (assoc data :doubled (* 2 (:x data)) :mycelium/transition :done))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:doubled :int]]}
+       :transitions #{:done}})
 
     (let [child-workflow {:cells {:start :comp/doubler}
                           :edges {:start {:done :end}}}]
@@ -49,13 +49,13 @@
                                         :output [:map [:doubled :int]]})
 
       ;; Parent cell that sets up data
-      (cell/defcell :comp/setup
-        {:transitions #{:next}}
-        [_ data]
-        (assoc data :x (:raw data) :mycelium/transition :next))
-      (cell/set-cell-schema! :comp/setup
-                             {:input [:map [:raw :int]]
-                              :output [:map [:x :int]]})
+      (defmethod cell/cell-spec :comp/setup [_]
+        {:id          :comp/setup
+         :handler     (fn [_ data]
+                        (assoc data :x (:raw data) :mycelium/transition :next))
+         :schema      {:input [:map [:raw :int]]
+                       :output [:map [:x :int]]}
+         :transitions #{:next}})
 
       (let [parent (wf/compile-workflow
                     {:cells {:start :comp/setup
@@ -69,13 +69,13 @@
 
 (deftest child-failure-propagates-test
   (testing "Child failure propagates as parent :failure transition"
-    (cell/defcell :comp/failing-cell
-      {:transitions #{:done}}
-      [_ _data]
-      (throw (Exception. "intentional failure")))
-    (cell/set-cell-schema! :comp/failing-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :comp/failing-cell [_]
+      {:id          :comp/failing-cell
+       :handler     (fn [_ _data]
+                      (throw (Exception. "intentional failure")))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:done}})
 
     (let [child-workflow {:cells {:start :comp/failing-cell}
                           :edges {:start {:done :end}}}]
@@ -83,13 +83,13 @@
                                        {:input [:map [:x :int]]
                                         :output [:map [:y :int]]})
 
-      (cell/defcell :comp/error-handler
-        {:transitions #{:done}}
-        [_ data]
-        (assoc data :error-handled true :mycelium/transition :done))
-      (cell/set-cell-schema! :comp/error-handler
-                             {:input [:map]
-                              :output [:map [:error-handled :boolean]]})
+      (defmethod cell/cell-spec :comp/error-handler [_]
+        {:id          :comp/error-handler
+         :handler     (fn [_ data]
+                        (assoc data :error-handled true :mycelium/transition :done))
+         :schema      {:input [:map]
+                       :output [:map [:error-handled :boolean]]}
+         :transitions #{:done}})
 
       (let [parent (wf/compile-workflow
                     {:cells {:start  :comp/failing-wf
@@ -103,13 +103,13 @@
 
 (deftest three-level-nesting-test
   (testing "Three-level nesting (grandchild→child→parent) works"
-    (cell/defcell :comp/adder
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :n (+ (:n data) 10) :mycelium/transition :done))
-    (cell/set-cell-schema! :comp/adder
-                           {:input [:map [:n :int]]
-                            :output [:map [:n :int]]})
+    (defmethod cell/cell-spec :comp/adder [_]
+      {:id          :comp/adder
+       :handler     (fn [_ data]
+                      (assoc data :n (+ (:n data) 10) :mycelium/transition :done))
+       :schema      {:input [:map [:n :int]]
+                     :output [:map [:n :int]]}
+       :transitions #{:done}})
 
     ;; Grandchild workflow
     (let [grandchild-wf {:cells {:start :comp/adder}
@@ -136,13 +136,13 @@
 
 (deftest child-trace-preserved-test
   (testing "Child trace preserved in output data"
-    (cell/defcell :comp/traced
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :mycelium/transition :done))
-    (cell/set-cell-schema! :comp/traced
-                           {:input [:map [:x :int]]
-                            :output [:map [:x :int]]})
+    (defmethod cell/cell-spec :comp/traced [_]
+      {:id          :comp/traced
+       :handler     (fn [_ data]
+                      (assoc data :mycelium/transition :done))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:x :int]]}
+       :transitions #{:done}})
 
     (let [child-wf {:cells {:start :comp/traced}
                     :edges {:start {:done :end}}}]
@@ -160,14 +160,14 @@
 
 (deftest resources-pass-to-child-test
   (testing "Resources pass through to child cells"
-    (cell/defcell :comp/resource-user
-      {:transitions #{:done}
-       :requires [:config]}
-      [{:keys [config]} data]
-      (assoc data :from-config (:value config) :mycelium/transition :done))
-    (cell/set-cell-schema! :comp/resource-user
-                           {:input [:map [:x :int]]
-                            :output [:map [:from-config :string]]})
+    (defmethod cell/cell-spec :comp/resource-user [_]
+      {:id          :comp/resource-user
+       :handler     (fn [{:keys [config]} data]
+                      (assoc data :from-config (:value config) :mycelium/transition :done))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:from-config :string]]}
+       :transitions #{:done}
+       :requires    [:config]})
 
     (let [child-wf {:cells {:start :comp/resource-user}
                     :edges {:start {:done :end}}}]

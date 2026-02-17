@@ -10,12 +10,10 @@
 
 ;; --- Cell registry ---
 
-(defmacro defcell
-  "Registers a cell and defines its handler (without schema).
-   Schema is provided by the manifest via `set-cell-schema!`.
-   See mycelium.cell/defcell."
-  [id opts bindings & body]
-  `(cell/defcell ~id ~opts ~bindings ~@body))
+(def cell-spec
+  "Multimethod for cell registration. Use (defmethod myc/cell-spec :id [_] {...}).
+   See mycelium.cell/cell-spec."
+  cell/cell-spec)
 
 ;; --- Workflow compilation ---
 

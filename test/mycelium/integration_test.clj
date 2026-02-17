@@ -10,21 +10,21 @@
 
 (deftest linear-workflow-end-to-end-test
   (testing "Linear workflow runs end-to-end, all data accumulated"
-    (cell/defcell :int/step-1
-      {:transitions #{:next}}
-      [_ data]
-      (assoc data :a (inc (:x data)) :mycelium/transition :next))
-    (cell/set-cell-schema! :int/step-1
-                           {:input [:map [:x :int]]
-                            :output [:map [:a :int]]})
+    (defmethod cell/cell-spec :int/step-1 [_]
+      {:id          :int/step-1
+       :handler     (fn [_ data]
+                      (assoc data :a (inc (:x data)) :mycelium/transition :next))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:a :int]]}
+       :transitions #{:next}})
 
-    (cell/defcell :int/step-2
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :b (* 2 (:a data)) :mycelium/transition :done))
-    (cell/set-cell-schema! :int/step-2
-                           {:input [:map [:a :int]]
-                            :output [:map [:b :int]]})
+    (defmethod cell/cell-spec :int/step-2 [_]
+      {:id          :int/step-2
+       :handler     (fn [_ data]
+                      (assoc data :b (* 2 (:a data)) :mycelium/transition :done))
+       :schema      {:input [:map [:a :int]]
+                     :output [:map [:b :int]]}
+       :transitions #{:done}})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/step-1
@@ -40,29 +40,29 @@
 
 (deftest branching-workflow-test
   (testing "Branching workflow takes correct path based on data"
-    (cell/defcell :int/router
-      {:transitions #{:high :low}}
-      [_ data]
-      (assoc data :mycelium/transition (if (> (:value data) 5) :high :low)))
-    (cell/set-cell-schema! :int/router
-                           {:input [:map [:value :int]]
-                            :output [:map]})
+    (defmethod cell/cell-spec :int/router [_]
+      {:id          :int/router
+       :handler     (fn [_ data]
+                      (assoc data :mycelium/transition (if (> (:value data) 5) :high :low)))
+       :schema      {:input [:map [:value :int]]
+                     :output [:map]}
+       :transitions #{:high :low}})
 
-    (cell/defcell :int/high-path
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :result "high" :mycelium/transition :done))
-    (cell/set-cell-schema! :int/high-path
-                           {:input [:map [:value :int]]
-                            :output [:map [:result :string]]})
+    (defmethod cell/cell-spec :int/high-path [_]
+      {:id          :int/high-path
+       :handler     (fn [_ data]
+                      (assoc data :result "high" :mycelium/transition :done))
+       :schema      {:input [:map [:value :int]]
+                     :output [:map [:result :string]]}
+       :transitions #{:done}})
 
-    (cell/defcell :int/low-path
-      {:transitions #{:done}}
-      [_ data]
-      (assoc data :result "low" :mycelium/transition :done))
-    (cell/set-cell-schema! :int/low-path
-                           {:input [:map [:value :int]]
-                            :output [:map [:result :string]]})
+    (defmethod cell/cell-spec :int/low-path [_]
+      {:id          :int/low-path
+       :handler     (fn [_ data]
+                      (assoc data :result "low" :mycelium/transition :done))
+       :schema      {:input [:map [:value :int]]
+                     :output [:map [:result :string]]}
+       :transitions #{:done}})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start    :int/router
@@ -78,13 +78,13 @@
 
 (deftest invalid-input-triggers-error-test
   (testing "Invalid input triggers error state (pre interceptor catches)"
-    (cell/defcell :int/strict-cell
-      {:transitions #{:ok}}
-      [_ data]
-      (assoc data :greeting (str "Hello " (:name data)) :mycelium/transition :ok))
-    (cell/set-cell-schema! :int/strict-cell
-                           {:input [:map [:name :string]]
-                            :output [:map [:greeting :string]]})
+    (defmethod cell/cell-spec :int/strict-cell [_]
+      {:id          :int/strict-cell
+       :handler     (fn [_ data]
+                      (assoc data :greeting (str "Hello " (:name data)) :mycelium/transition :ok))
+       :schema      {:input [:map [:name :string]]
+                     :output [:map [:greeting :string]]}
+       :transitions #{:ok}})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/strict-cell}
@@ -96,14 +96,14 @@
 
 (deftest invalid-output-triggers-error-test
   (testing "Invalid output triggers error state (post interceptor catches)"
-    (cell/defcell :int/bad-output-cell
-      {:transitions #{:ok}}
-      [_ data]
-      ;; Returns :y as int instead of string - schema violation
-      (assoc data :y 42 :mycelium/transition :ok))
-    (cell/set-cell-schema! :int/bad-output-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :string]]})
+    (defmethod cell/cell-spec :int/bad-output-cell [_]
+      {:id          :int/bad-output-cell
+       :handler     (fn [_ data]
+                      ;; Returns :y as int instead of string - schema violation
+                      (assoc data :y 42 :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :string]]}
+       :transitions #{:ok}})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/bad-output-cell}
@@ -115,13 +115,13 @@
 
 (deftest error-state-receives-schema-error-test
   (testing "Error state receives :mycelium/schema-error details"
-    (cell/defcell :int/will-fail
-      {:transitions #{:ok}}
-      [_ data]
-      (assoc data :y 42 :mycelium/transition :ok))
-    (cell/set-cell-schema! :int/will-fail
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :string]]})
+    (defmethod cell/cell-spec :int/will-fail [_]
+      {:id          :int/will-fail
+       :handler     (fn [_ data]
+                      (assoc data :y 42 :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :string]]}
+       :transitions #{:ok}})
 
     (let [error-data (atom nil)
           compiled   (wf/compile-workflow
@@ -138,16 +138,16 @@
 
 (deftest resources-pass-through-test
   (testing "Resources pass through to cell handlers"
-    (cell/defcell :int/uses-resource
-      {:transitions #{:ok}
-       :requires [:config]}
-      [{:keys [config]} data]
-      (assoc data
-             :config-val (:api-key config)
-             :mycelium/transition :ok))
-    (cell/set-cell-schema! :int/uses-resource
-                           {:input [:map [:x :int]]
-                            :output [:map [:config-val :string]]})
+    (defmethod cell/cell-spec :int/uses-resource [_]
+      {:id          :int/uses-resource
+       :handler     (fn [{:keys [config]} data]
+                      (assoc data
+                             :config-val (:api-key config)
+                             :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:config-val :string]]}
+       :transitions #{:ok}
+       :requires    [:config]})
 
     (let [compiled  (wf/compile-workflow
                      {:cells {:start :int/uses-resource}
@@ -160,16 +160,16 @@
 
 (deftest looping-workflow-test
   (testing "Looping workflow (cycle) works with counter"
-    (cell/defcell :int/incrementer
-      {:transitions #{:again :done}}
-      [_ data]
-      (let [new-count (inc (:count data))]
-        (assoc data
-               :count new-count
-               :mycelium/transition (if (>= new-count 5) :done :again))))
-    (cell/set-cell-schema! :int/incrementer
-                           {:input [:map [:count :int]]
-                            :output [:map [:count :int]]})
+    (defmethod cell/cell-spec :int/incrementer [_]
+      {:id          :int/incrementer
+       :handler     (fn [_ data]
+                      (let [new-count (inc (:count data))]
+                        (assoc data
+                               :count new-count
+                               :mycelium/transition (if (>= new-count 5) :done :again))))
+       :schema      {:input [:map [:count :int]]
+                     :output [:map [:count :int]]}
+       :transitions #{:again :done}})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/incrementer}
@@ -181,16 +181,16 @@
 
 (deftest async-cell-in-workflow-test
   (testing "Async cell runs correctly in workflow"
-    (cell/defcell :int/async-cell
-      {:transitions #{:ok}
-       :async? true}
-      [_ data callback _error-callback]
-      (future
-        (Thread/sleep 10)
-        (callback (assoc data :y (* (:x data) 3) :mycelium/transition :ok))))
-    (cell/set-cell-schema! :int/async-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :int/async-cell [_]
+      {:id          :int/async-cell
+       :handler     (fn [_ data callback _error-callback]
+                      (future
+                        (Thread/sleep 10)
+                        (callback (assoc data :y (* (:x data) 3) :mycelium/transition :ok))))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:ok}
+       :async?      true})
 
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/async-cell}

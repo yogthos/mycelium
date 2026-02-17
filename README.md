@@ -18,24 +18,26 @@ LLM coding agents fail at large codebases for the same reason humans do: unbound
 
 ### Define Cells
 
-A cell is a pure function with schema contracts:
+A cell is a pure function with schema contracts, registered via `defmethod`:
 
 ```clojure
-(require '[mycelium.core :as myc])
+(require '[mycelium.cell :as cell])
 
-(myc/defcell :math/double
-  {:schema      {:input  [:map [:x :int]]
+(defmethod cell/cell-spec :math/double [_]
+  {:id          :math/double
+   :handler     (fn [_resources data]
+                  (assoc data :result (* 2 (:x data)) :mycelium/transition :done))
+   :schema      {:input  [:map [:x :int]]
                  :output [:map [:result :int]]}
-   :transitions #{:done}}
-  [_resources data]
-  (assoc data :result (* 2 (:x data)) :mycelium/transition :done))
+   :transitions #{:done}})
 
-(myc/defcell :math/add-ten
-  {:schema      {:input  [:map [:result :int]]
+(defmethod cell/cell-spec :math/add-ten [_]
+  {:id          :math/add-ten
+   :handler     (fn [_resources data]
+                  (assoc data :result (+ 10 (:result data)) :mycelium/transition :done))
+   :schema      {:input  [:map [:result :int]]
                  :output [:map [:result :int]]}
-   :transitions #{:done}}
-  [_resources data]
-  (assoc data :result (+ 10 (:result data)) :mycelium/transition :done))
+   :transitions #{:done}})
 ```
 
 Cells must:
@@ -46,6 +48,8 @@ Cells must:
 ### Compose into Workflows
 
 ```clojure
+(require '[mycelium.core :as myc])
+
 (let [result (myc/run-workflow
                {:cells {:start  :math/double
                         :add    :math/add-ten}
@@ -62,13 +66,14 @@ Cells must:
 Edges map transition keywords to targets:
 
 ```clojure
-(myc/defcell :check/threshold
-  {:schema      {:input  [:map [:value :int]]
+(defmethod cell/cell-spec :check/threshold [_]
+  {:id          :check/threshold
+   :handler     (fn [_ data]
+                  (assoc data :mycelium/transition
+                         (if (> (:value data) 10) :high :low)))
+   :schema      {:input  [:map [:value :int]]
                  :output [:map]}
-   :transitions #{:high :low}}
-  [_ data]
-  (assoc data :mycelium/transition
-         (if (> (:value data) 10) :high :low)))
+   :transitions #{:high :low}})
 
 (myc/run-workflow
   {:cells {:start :check/threshold
@@ -85,13 +90,14 @@ Edges map transition keywords to targets:
 Cells with multiple transitions can declare different output schemas for each transition:
 
 ```clojure
-(myc/defcell :user/fetch
-  {:transitions #{:found :not-found}
-   :requires [:db]}
-  [{:keys [db]} data]
-  (if-let [profile (get-user db (:user-id data))]
-    (assoc data :profile profile :mycelium/transition :found)
-    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+(defmethod cell/cell-spec :user/fetch [_]
+  {:id          :user/fetch
+   :handler     (fn [{:keys [db]} data]
+                  (if-let [profile (get-user db (:user-id data))]
+                    (assoc data :profile profile :mycelium/transition :found)
+                    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+   :transitions #{:found :not-found}
+   :requires    [:db]})
 ```
 
 In the manifest, use a map instead of a vector for `:output`:
@@ -112,13 +118,14 @@ The schema chain validator tracks which keys are available on each path independ
 External dependencies are injected, never acquired by cells:
 
 ```clojure
-(myc/defcell :user/fetch
-  {:transitions #{:found :not-found}
-   :requires [:db]}
-  [{:keys [db]} data]
-  (if-let [profile (get-user db (:user-id data))]
-    (assoc data :profile profile :mycelium/transition :found)
-    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+(defmethod cell/cell-spec :user/fetch [_]
+  {:id          :user/fetch
+   :handler     (fn [{:keys [db]} data]
+                  (if-let [profile (get-user db (:user-id data))]
+                    (assoc data :profile profile :mycelium/transition :found)
+                    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+   :transitions #{:found :not-found}
+   :requires    [:db]})
 
 ;; Resources are passed at run time
 (myc/run-workflow workflow {:db my-db-conn} {:user-id "alice"})
@@ -127,18 +134,19 @@ External dependencies are injected, never acquired by cells:
 ### Async Cells
 
 ```clojure
-(myc/defcell :api/fetch-data
-  {:schema      {:input  [:map [:url :string]]
+(defmethod cell/cell-spec :api/fetch-data [_]
+  {:id          :api/fetch-data
+   :handler     (fn [_resources data callback error-callback]
+                  (future
+                    (try
+                      (let [resp (http/get (:url data))]
+                        (callback (assoc data :response resp :mycelium/transition :ok)))
+                      (catch Exception e
+                        (error-callback e)))))
+   :schema      {:input  [:map [:url :string]]
                  :output [:map [:response map?]]}
    :transitions #{:ok :error}
-   :async?      true}
-  [_resources data callback error-callback]
-  (future
-    (try
-      (let [resp (http/get (:url data))]
-        (callback (assoc data :response resp :mycelium/transition :ok)))
-      (catch Exception e
-        (error-callback e)))))
+   :async?      true})
 ```
 
 ## Compile-Time Validation
@@ -321,7 +329,7 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 ```
 mycelium/
 ├── src/mycelium/
-│   ├── cell.clj          ;; Cell registry, defcell macro
+│   ├── cell.clj          ;; Cell registry (multimethod-based)
 │   ├── schema.clj        ;; Malli pre/post interceptors
 │   ├── workflow.clj       ;; DSL → Maestro compiler
 │   ├── compose.clj        ;; Hierarchical workflow nesting
@@ -329,7 +337,7 @@ mycelium/
 │   ├── dev.clj            ;; Testing harness, visualization
 │   ├── orchestrate.clj    ;; Agent orchestration helpers
 │   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 97 tests, 188 assertions
+└── test/mycelium/         ;; 95 tests, 195 assertions
 ```
 
 ## License

@@ -9,13 +9,13 @@
 
 (deftest test-cell-passes-valid-test
   (testing "test-cell passes with valid handler → {:pass? true}"
-    (cell/defcell :dev/good-cell
-      {:transitions #{:ok}}
-      [_ data]
-      (assoc data :y (* 2 (:x data)) :mycelium/transition :ok))
-    (cell/set-cell-schema! :dev/good-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :dev/good-cell [_]
+      {:id          :dev/good-cell
+       :handler     (fn [_ data]
+                      (assoc data :y (* 2 (:x data)) :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:ok}})
 
     (let [result (dev/test-cell :dev/good-cell
                                 {:input {:x 5}
@@ -28,14 +28,14 @@
 
 (deftest test-cell-reports-failure-test
   (testing "test-cell reports failure with bad output → {:pass? false :errors [...]}"
-    (cell/defcell :dev/bad-cell
-      {:transitions #{:ok}}
-      [_ data]
-      ;; Returns :y as int instead of string
-      (assoc data :y 42 :mycelium/transition :ok))
-    (cell/set-cell-schema! :dev/bad-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :string]]})
+    (defmethod cell/cell-spec :dev/bad-cell [_]
+      {:id          :dev/bad-cell
+       :handler     (fn [_ data]
+                      ;; Returns :y as int instead of string
+                      (assoc data :y 42 :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :string]]}
+       :transitions #{:ok}})
 
     (let [result (dev/test-cell :dev/bad-cell
                                 {:input {:x 5}
@@ -73,13 +73,13 @@
 
 (deftest test-cell-expected-transition-pass-test
   (testing "test-cell with :expected-transition passes when transition matches"
-    (cell/defcell :dev/trans-cell
-      {:transitions #{:ok :fail}}
-      [_ data]
-      (assoc data :y 1 :mycelium/transition :ok))
-    (cell/set-cell-schema! :dev/trans-cell
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :dev/trans-cell [_]
+      {:id          :dev/trans-cell
+       :handler     (fn [_ data]
+                      (assoc data :y 1 :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:ok :fail}})
     (let [result (dev/test-cell :dev/trans-cell
                                 {:input {:x 5}
                                  :expected-transition :ok})]
@@ -87,13 +87,13 @@
 
 (deftest test-cell-expected-transition-fail-test
   (testing "test-cell with :expected-transition fails when transition doesn't match"
-    (cell/defcell :dev/trans-cell2
-      {:transitions #{:ok :fail}}
-      [_ data]
-      (assoc data :y 1 :mycelium/transition :ok))
-    (cell/set-cell-schema! :dev/trans-cell2
-                           {:input [:map [:x :int]]
-                            :output [:map [:y :int]]})
+    (defmethod cell/cell-spec :dev/trans-cell2 [_]
+      {:id          :dev/trans-cell2
+       :handler     (fn [_ data]
+                      (assoc data :y 1 :mycelium/transition :ok))
+       :schema      {:input [:map [:x :int]]
+                     :output [:map [:y :int]]}
+       :transitions #{:ok :fail}})
     (let [result (dev/test-cell :dev/trans-cell2
                                 {:input {:x 5}
                                  :expected-transition :fail})]
@@ -102,14 +102,14 @@
 
 (deftest test-cell-per-transition-schema-test
   (testing "test-cell validates against per-transition schema"
-    (cell/defcell :dev/pt-cell
-      {:transitions #{:found :not-found}}
-      [_ data]
-      (assoc data :profile {:name "Alice"} :mycelium/transition :found))
-    (cell/set-cell-schema! :dev/pt-cell
-                           {:input [:map [:id :string]]
-                            :output {:found     [:map [:profile [:map [:name :string]]]]
-                                     :not-found [:map [:error-message :string]]}})
+    (defmethod cell/cell-spec :dev/pt-cell [_]
+      {:id          :dev/pt-cell
+       :handler     (fn [_ data]
+                      (assoc data :profile {:name "Alice"} :mycelium/transition :found))
+       :schema      {:input [:map [:id :string]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}
+       :transitions #{:found :not-found}})
     (let [result (dev/test-cell :dev/pt-cell
                                 {:input {:id "alice"}})]
       (is (true? (:pass? result))))))
@@ -118,16 +118,16 @@
 
 (deftest test-transitions-test
   (testing "test-transitions tests multiple transitions in one call"
-    (cell/defcell :dev/multi-cell
-      {:transitions #{:found :not-found}}
-      [_ data]
-      (if (= (:id data) "alice")
-        (assoc data :profile {:name "Alice"} :mycelium/transition :found)
-        (assoc data :error-message "Not found" :mycelium/transition :not-found)))
-    (cell/set-cell-schema! :dev/multi-cell
-                           {:input [:map [:id :string]]
-                            :output {:found     [:map [:profile [:map [:name :string]]]]
-                                     :not-found [:map [:error-message :string]]}})
+    (defmethod cell/cell-spec :dev/multi-cell [_]
+      {:id          :dev/multi-cell
+       :handler     (fn [_ data]
+                      (if (= (:id data) "alice")
+                        (assoc data :profile {:name "Alice"} :mycelium/transition :found)
+                        (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+       :schema      {:input [:map [:id :string]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}
+       :transitions #{:found :not-found}})
     (let [results (dev/test-transitions :dev/multi-cell
                     {:found     {:input {:id "alice"}}
                      :not-found {:input {:id "nobody"}}})]

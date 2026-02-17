@@ -1,5 +1,5 @@
 (ns mycelium.cell
-  "Cell registry and defcell macro for Mycelium."
+  "Cell registry for Mycelium. Cells are registered via `defmethod cell-spec`."
   (:require [clojure.set]
             [malli.core :as m]))
 
@@ -10,14 +10,14 @@
 
 (defmethod cell-spec :default [_] nil)
 
-(defonce ^:private schema-overrides (atom {}))
+(defonce ^:private cell-overrides (atom {}))
 
 (defn clear-registry!
   "Removes all cells from the registry."
   []
   (doseq [k (keys (dissoc (methods cell-spec) :default))]
     (remove-method cell-spec k))
-  (reset! schema-overrides {}))
+  (reset! cell-overrides {}))
 
 (defn- validate-schema! [schema label]
   (try
@@ -56,43 +56,13 @@
     :else
     (validate-schema! output-schema label)))
 
-(defn register-cell!
-  "Validates and registers a cell spec in the global registry.
-   Cell spec shape:
-     {:id :ns/name, :handler fn, :schema {:input malli :output malli},
-      :transitions #{:kw ...}, :requires [:resource ...], :async? bool, :doc \"\"}
-   Schema is optional at registration time — the manifest is the single source of truth
-   for schemas and will attach them via `set-cell-schema!`.
-   Options:
-     :replace? - if true, allows overwriting an existing cell (default false)"
-  ([spec] (register-cell! spec {}))
-  ([{:keys [id handler schema transitions] :as spec} {:keys [replace?]}]
-   (when-not id
-     (throw (ex-info "Cell spec missing :id" {:spec spec})))
-   (when-not handler
-     (throw (ex-info "Cell spec missing :handler" {:id id})))
-   (when (or (nil? transitions) (empty? transitions))
-     (throw (ex-info (str "Cell " id " must declare non-empty transitions")
-                     {:id id})))
-   (when schema
-     (when (:input schema)
-       (validate-schema! (:input schema) (str id " :input")))
-     (when (:output schema)
-       (validate-output-schema! (:output schema) transitions (str id " :output"))))
-   (when (and (not replace?) (cell-spec id))
-     (throw (ex-info (str "Cell " id " already registered")
-                     {:id id})))
-   (.addMethod cell-spec id (constantly spec))
-   (swap! schema-overrides dissoc id)
-   spec))
-
 (defn get-cell
   "Returns the cell spec for the given id, or nil if not found."
   [id]
   (let [spec (cell-spec id)]
     (when spec
-      (if-let [overrides (get @schema-overrides id)]
-        (assoc spec :schema overrides)
+      (if-let [overrides (get @cell-overrides id)]
+        (merge spec overrides)
         spec))))
 
 (defn get-cell!
@@ -110,33 +80,41 @@
   (when-not (cell-spec cell-id)
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
-  (let [transitions (:transitions (cell-spec cell-id))]
+  (let [transitions (:transitions (get-cell cell-id))]
     (when (:input schema)
       (validate-schema! (:input schema) (str cell-id " :input")))
     (when (:output schema)
       (validate-output-schema! (:output schema) transitions (str cell-id " :output"))))
-  (swap! schema-overrides assoc cell-id schema)
+  (swap! cell-overrides update cell-id merge {:schema schema})
   schema)
+
+(defn set-cell-meta!
+  "Sets metadata overrides (schema, transitions, requires) on a registered cell.
+   The manifest calls this to inject metadata into cells that were registered
+   without transitions/requires. Validates transitions are non-empty and schema
+   is well-formed. Throws if the cell is not found."
+  [cell-id {:keys [schema transitions requires] :as meta-map}]
+  (when-not (cell-spec cell-id)
+    (throw (ex-info (str "Cell " cell-id " not found in registry")
+                    {:id cell-id})))
+  (when (and (some? transitions) (empty? transitions))
+    (throw (ex-info (str "Cell " cell-id " must declare non-empty transitions")
+                    {:id cell-id})))
+  (when schema
+    (let [effective-transitions (or transitions (:transitions (get-cell cell-id)))]
+      (when (:input schema)
+        (validate-schema! (:input schema) (str cell-id " :input")))
+      (when (:output schema)
+        (validate-output-schema! (:output schema) effective-transitions (str cell-id " :output")))))
+  (let [overrides (cond-> {}
+                    schema      (assoc :schema schema)
+                    transitions (assoc :transitions transitions)
+                    requires    (assoc :requires requires))]
+    (swap! cell-overrides update cell-id merge overrides))
+  meta-map)
 
 (defn list-cells
   "Returns a seq of all registered cell IDs."
   []
   (keys (dissoc (methods cell-spec) :default)))
 
-(defmacro defcell
-  "Registers a cell and defines its handler.
-   Usage:
-     (defcell :ns/name
-       {:doc \"...\" :transitions #{...}}
-       [resources data]
-       body...)
-
-   Schema is provided by the manifest via `set-cell-schema!`, not in defcell.
-   For async cells, add :async? true to opts and use [resources data callback error-callback]."
-  [id opts bindings & body]
-  `(let [handler# (fn ~bindings ~@body)]
-     (register-cell!
-      (merge {:id      ~id
-              :handler handler#}
-             ~opts)
-      {:replace? true})))
