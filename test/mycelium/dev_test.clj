@@ -153,3 +153,13 @@
       (is (every? vector? paths))
       ;; Check first step in each path is start
       (is (every? #(= :start (:cell (first %))) paths)))))
+
+(deftest enumerate-paths-cycle-terminates-test
+  (testing "enumerate-paths terminates on cyclic workflows (loop edges)"
+    (let [manifest {:cells {:start {:id :test/a :transitions #{:again :done}}}
+                    :edges {:start {:again :start, :done :end}}}
+          paths (dev/enumerate-paths manifest)]
+      ;; Should produce exactly 1 path: start→end via :done
+      ;; The :again→:start cycle is detected and pruned
+      (is (= 1 (count paths)))
+      (is (= :done (:transition (first (first paths))))))))

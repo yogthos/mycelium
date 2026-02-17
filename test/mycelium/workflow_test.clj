@@ -264,3 +264,27 @@
                             :step-b {:success :step-c}
                             :step-c {:done :end}}}]
       (is (some? (wf/compile-workflow workflow))))))
+
+;; ===== Map schema with Malli properties =====
+
+(deftest schema-chain-with-map-properties-test
+  (testing "Schema chain works when :map schema has Malli properties like {:closed true}"
+    (defmethod cell/cell-spec :test/props-producer [_]
+      {:id :test/props-producer
+       :handler (fn [_ data] (assoc data :y 1 :mycelium/transition :done))
+       :schema {:input [:map [:x :int]]
+                :output [:map [:y :int]]}
+       :transitions #{:done}})
+    (defmethod cell/cell-spec :test/props-consumer [_]
+      {:id :test/props-consumer
+       :handler (fn [_ data] (assoc data :z 1 :mycelium/transition :done))
+       :schema {:input [:map {:closed true} [:y :int]]
+                :output [:map [:z :int]]}
+       :transitions #{:done}})
+    ;; Should compile without schema chain error — {:closed true} is a Malli
+    ;; property map, not a key requirement
+    (is (some? (wf/compile-workflow
+                {:cells {:start  :test/props-producer
+                         :step-2 :test/props-consumer}
+                 :edges {:start  {:done :step-2}
+                         :step-2 {:done :end}}})))))

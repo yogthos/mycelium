@@ -13,28 +13,28 @@
    `workflow`  - workflow definition map {:cells ... :edges ...}
    `schema`    - {:input [...] :output [...]} for the cell"
   [cell-id workflow schema]
-  (let [handler (fn [resources data]
-                  (let [compiled (wf/compile-workflow workflow
-                                                     {:on-error (fn [_ fsm-state]
-                                                                  (-> (:data fsm-state)
-                                                                      (assoc :mycelium/error
-                                                                             (or (:error fsm-state)
-                                                                                 (get-in fsm-state [:data :mycelium/schema-error])))
-                                                                      (assoc :mycelium/child-trace
-                                                                             (:trace fsm-state))))
-                                                      :on-end (fn [_ fsm-state]
-                                                                (-> (:data fsm-state)
-                                                                    (assoc :mycelium/child-trace
-                                                                           (:trace fsm-state))))})]
-                    (try
-                      (let [result (fsm/run compiled resources {:data data})]
-                        (if (:mycelium/error result)
-                          (assoc result :mycelium/transition :failure)
-                          (assoc result :mycelium/transition :success)))
-                      (catch Exception e
-                        (-> data
-                            (assoc :mycelium/error (ex-message e)
-                                   :mycelium/transition :failure))))))]
+  (let [compiled (wf/compile-workflow workflow
+                                      {:on-error (fn [_ fsm-state]
+                                                   (-> (:data fsm-state)
+                                                       (assoc :mycelium/error
+                                                              (or (:error fsm-state)
+                                                                  (get-in fsm-state [:data :mycelium/schema-error])))
+                                                       (assoc :mycelium/child-trace
+                                                              (:trace fsm-state))))
+                                       :on-end (fn [_ fsm-state]
+                                                 (-> (:data fsm-state)
+                                                     (assoc :mycelium/child-trace
+                                                            (:trace fsm-state))))})
+        handler (fn [resources data]
+                  (try
+                    (let [result (fsm/run compiled resources {:data data})]
+                      (if (:mycelium/error result)
+                        (assoc result :mycelium/transition :failure)
+                        (assoc result :mycelium/transition :success)))
+                    (catch Exception e
+                      (-> data
+                          (assoc :mycelium/error (ex-message e)
+                                 :mycelium/transition :failure)))))]
     {:id          cell-id
      :handler     handler
      ;; Use the provided input schema but make output open (:map)

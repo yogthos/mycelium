@@ -47,11 +47,13 @@
        :errors  "Missing :mycelium/transition in output data"
        :data    data}
 
-      (not (contains? transitions transition))
+      (or (nil? transitions) (not (contains? transitions transition)))
       {:cell-id (:id cell)
        :phase   :output
-       :errors  (str "Invalid transition " transition
-                     ", expected one of " transitions)
+       :errors  (if (nil? transitions)
+                  (str "Cell " (:id cell) " has no declared transitions")
+                  (str "Invalid transition " transition
+                       ", expected one of " transitions))
        :data    data}
 
       :else

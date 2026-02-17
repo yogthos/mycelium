@@ -67,24 +67,32 @@
    Returns seq of paths, each a vector of {:cell :transition :target}."
   [{:keys [cells edges]}]
   (let [terminal? #{:end :error :halt}]
-    (loop [queue [[:start []]]
+    (loop [queue [[:start [] #{}]]
            paths []]
       (if (empty? queue)
         paths
-        (let [[cell-name path-so-far] (first queue)
+        (let [[cell-name path-so-far visited] (first queue)
               rest-queue (rest queue)]
-          (if (terminal? cell-name)
+          (cond
+            (terminal? cell-name)
             (recur rest-queue (conj paths path-so-far))
-            (let [edge-def (get edges cell-name)]
+
+            (contains? visited cell-name)
+            (recur rest-queue paths)
+
+            :else
+            (let [edge-def    (get edges cell-name)
+                  new-visited (conj visited cell-name)]
               (if (keyword? edge-def)
                 ;; Unconditional — use :unconditional as transition label
                 (let [step {:cell cell-name :transition :unconditional :target edge-def}]
-                  (recur (conj (vec rest-queue) [edge-def (conj path-so-far step)])
+                  (recur (conj (vec rest-queue)
+                               [edge-def (conj path-so-far step) new-visited])
                          paths))
                 ;; Map edges
                 (let [next-items (mapv (fn [[transition target]]
                                          (let [step {:cell cell-name :transition transition :target target}]
-                                           [target (conj path-so-far step)]))
+                                           [target (conj path-so-far step) new-visited]))
                                        edge-def)]
                   (recur (into (vec rest-queue) next-items)
                          paths))))))))))

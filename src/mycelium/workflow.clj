@@ -120,10 +120,14 @@
                              :declared   declared}))))))))
 
 (defn- get-map-keys
-  "Extracts top-level keys from a Malli :map schema. Returns nil if not a :map schema."
+  "Extracts top-level keys from a Malli :map schema. Returns nil if not a :map schema.
+   Skips Malli property maps (e.g. {:closed true} in [:map {:closed true} [:x :int]])."
   [schema]
   (when (and (vector? schema) (= :map (first schema)))
-    (set (map first (rest schema)))))
+    (set (keep (fn [entry]
+                 (when (vector? entry)
+                   (first entry)))
+               (rest schema)))))
 
 (defn- get-output-keys-for-transition
   "Gets output keys for a specific transition of a cell.

@@ -181,3 +181,34 @@
             resources {:config {:value "from-parent"}}
             result    (fsm/run parent resources {:data {:x 1}})]
         (is (= "from-parent" (:from-config result)))))))
+
+;; ===== 7. Child workflow compiled once, not per-invocation =====
+
+(deftest child-workflow-compiled-once-test
+  (testing "workflow->cell compiles child workflow once at creation, not per handler call"
+    (defmethod cell/cell-spec :comp/counter-cell [_]
+      {:id          :comp/counter-cell
+       :handler     (fn [_ data]
+                      (assoc data :n (inc (:n data)) :mycelium/transition :done))
+       :schema      {:input [:map [:n :int]]
+                     :output [:map [:n :int]]}
+       :transitions #{:done}})
+
+    (let [compile-count (atom 0)
+          child-wf      {:cells {:start :comp/counter-cell}
+                         :edges {:start {:done :end}}}]
+      (with-redefs [wf/compile-workflow (let [orig wf/compile-workflow]
+                                          (fn [& args]
+                                            (swap! compile-count inc)
+                                            (apply orig args)))]
+        (let [cell-spec (compose/workflow->cell :comp/once-test child-wf
+                                                {:input [:map [:n :int]]
+                                                 :output [:map [:n :int]]})
+              handler   (:handler cell-spec)]
+          ;; compile-workflow called once during workflow->cell
+          (is (= 1 @compile-count))
+          ;; Run handler multiple times — should NOT recompile
+          (handler {} {:n 0})
+          (handler {} {:n 10})
+          (handler {} {:n 20})
+          (is (= 1 @compile-count)))))))

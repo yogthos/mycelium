@@ -28,7 +28,7 @@
 (defn plan
   "Generates an execution plan from a manifest.
    Identifies which cells can be built in parallel."
-  [{:keys [cells edges] :as manifest-data}]
+  [{:keys [cells]}]
   (let [cell-names (vec (keys cells))
         ;; In the common case, all cells are independent (each can be developed in isolation)
         ;; They only have runtime data dependencies, not development dependencies
