@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@13.0
+        with:
+          cli: latest
+
+      - name: Cache Maven dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: m2-${{ hashFiles('**/deps.edn') }}
+          restore-keys: m2-
+
+      - name: Cache Gitlibs
+        uses: actions/cache@v4
+        with:
+          path: ~/.gitlibs
+          key: gitlibs-${{ hashFiles('**/deps.edn') }}
+          restore-keys: gitlibs-
+
+      - name: Run framework tests
+        run: clojure -M:test
+
+      - name: Run example tests
+        working-directory: examples/user_onboarding
+        run: clojure -M:test
