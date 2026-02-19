@@ -18,33 +18,43 @@
 
 (deftest parse-request-success-test
   (testing "parse-request extracts credentials from string-keyed body"
-    (let [result (dev/test-cell :auth/parse-request
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          result (dev/test-cell :auth/parse-request
                   {:input {:http-request {:headers {"content-type" "application/json"}
                                           :body    {"username" "alice"
                                                     "token"    "tok_abc123"}}}
-                   :resources {}})]
+                   :resources {}
+                   :dispatches dispatches})]
       (is (:pass? result))
       (is (= "alice" (get-in result [:output :user-id])))
-      (is (= "tok_abc123" (get-in result [:output :auth-token]))))))
+      (is (= "tok_abc123" (get-in result [:output :auth-token])))
+      (is (= :success (:matched-dispatch result))))))
 
 (deftest parse-request-keyword-keys-test
   (testing "parse-request extracts credentials from keyword-keyed body (Muuntaja)"
-    (let [result (dev/test-cell :auth/parse-request
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          result (dev/test-cell :auth/parse-request
                   {:input {:http-request {:headers {"content-type" "application/json"}
                                           :body    {:username "bob"
                                                     :token    "tok_bob456"}}}
-                   :resources {}})]
+                   :resources {}
+                   :dispatches dispatches})]
       (is (:pass? result))
       (is (= "bob" (get-in result [:output :user-id])))
       (is (= "tok_bob456" (get-in result [:output :auth-token]))))))
 
 (deftest parse-request-failure-test
   (testing "parse-request fails with missing credentials and sets error context"
-    (let [result (dev/test-cell :auth/parse-request
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          result (dev/test-cell :auth/parse-request
                   {:input {:http-request {:headers {}
                                           :body    {}}}
-                   :resources {}})]
-      (is (= :failure (get-in result [:output :mycelium/transition])))
+                   :resources {}
+                   :dispatches dispatches})]
+      (is (= :failure (:matched-dispatch result)))
       (is (= :bad-request (get-in result [:output :error-type])))
       (is (string? (get-in result [:output :error-message]))))))
 
@@ -53,19 +63,26 @@
     (with-redefs [db/get-session (fn [_ds token]
                                    (when (= token "tok_abc123")
                                      {:user_id "alice" :valid 1}))]
-      (let [result (dev/test-cell :auth/validate-session
+      (let [dispatches {:authorized   (fn [d] (:session-valid d))
+                        :unauthorized (fn [d] (not (:session-valid d)))}
+            result (dev/test-cell :auth/validate-session
                     {:input {:user-id "alice" :auth-token "tok_abc123"}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
         (is (true? (get-in result [:output :session-valid])))
-        (is (= "alice" (get-in result [:output :user-id])))))))
+        (is (= "alice" (get-in result [:output :user-id])))
+        (is (= :authorized (:matched-dispatch result)))))))
 
 (deftest validate-session-unauthorized-test
   (testing "validate-session rejects invalid token with error context"
     (with-redefs [db/get-session (fn [_ds _token] nil)]
-      (let [result (dev/test-cell :auth/validate-session
+      (let [dispatches {:authorized   (fn [d] (:session-valid d))
+                        :unauthorized (fn [d] (not (:session-valid d)))}
+            result (dev/test-cell :auth/validate-session
                     {:input {:user-id "alice" :auth-token "bad_token"}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
         (is (false? (get-in result [:output :session-valid])))
         (is (= :unauthorized (get-in result [:output :error-type])))
@@ -75,64 +92,88 @@
   (testing "validate-session rejects expired token"
     (with-redefs [db/get-session (fn [_ds _token]
                                    {:user_id "alice" :valid 0})]
-      (let [result (dev/test-cell :auth/validate-session
+      (let [dispatches {:authorized   (fn [d] (:session-valid d))
+                        :unauthorized (fn [d] (not (:session-valid d)))}
+            result (dev/test-cell :auth/validate-session
                     {:input {:user-id "alice" :auth-token "tok_expired"}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
-        (is (false? (get-in result [:output :session-valid])))))))
+        (is (false? (get-in result [:output :session-valid])))
+        (is (= :unauthorized (:matched-dispatch result)))))))
 
 (deftest extract-session-success-test
   (testing "extract-session reads token from query params"
-    (let [result (dev/test-cell :auth/extract-session
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          result (dev/test-cell :auth/extract-session
                   {:input {:http-request {:query-params {:token "tok_abc123"}}}
-                   :resources {}})]
+                   :resources {}
+                   :dispatches dispatches})]
       (is (:pass? result))
       (is (= "tok_abc123" (get-in result [:output :auth-token])))
-      (is (= :success (get-in result [:output :mycelium/transition]))))))
+      (is (= :success (:matched-dispatch result))))))
 
 (deftest extract-session-failure-test
   (testing "extract-session fails when no token in query params"
-    (let [result (dev/test-cell :auth/extract-session
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          result (dev/test-cell :auth/extract-session
                   {:input {:http-request {:query-params {}}}
-                   :resources {}})]
-      (is (= :failure (get-in result [:output :mycelium/transition])))
+                   :resources {}
+                   :dispatches dispatches})]
+      (is (= :failure (:matched-dispatch result)))
       (is (= :unauthorized (get-in result [:output :error-type]))))))
 
 (deftest extract-cookie-session-success-test
   (testing "extract-cookie-session reads token from cookie"
-    (let [result (dev/test-cell :auth/extract-cookie-session
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (not (:auth-token d)))}
+          result (dev/test-cell :auth/extract-cookie-session
                   {:input {:http-request {:cookies {"session-token" {:value "tok_abc123"}}}}
-                   :resources {}})]
+                   :resources {}
+                   :dispatches dispatches})]
       (is (:pass? result))
       (is (= "tok_abc123" (get-in result [:output :auth-token])))
-      (is (= :success (get-in result [:output :mycelium/transition]))))))
+      (is (= :success (:matched-dispatch result))))))
 
 (deftest extract-cookie-session-failure-test
   (testing "extract-cookie-session fails when no session cookie"
-    (let [result (dev/test-cell :auth/extract-cookie-session
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (not (:auth-token d)))}
+          result (dev/test-cell :auth/extract-cookie-session
                   {:input {:http-request {:cookies {}}}
-                   :resources {}})]
-      (is (= :failure (get-in result [:output :mycelium/transition]))))))
+                   :resources {}
+                   :dispatches dispatches})]
+      (is (= :failure (:matched-dispatch result))))))
 
 ;; ===== test-transitions for multi-transition cells =====
 
 (deftest parse-request-test-transitions-test
-  (testing "test-transitions covers both parse-request transitions"
-    (let [results (dev/test-transitions :auth/parse-request
-                    {:success {:input {:http-request {:headers {} :body {"username" "alice" "token" "tok_abc"}}}}
-                     :failure {:input {:http-request {:headers {} :body {}}}}})]
+  (testing "test-transitions covers both parse-request dispatches"
+    (let [dispatches {:success (fn [d] (:auth-token d))
+                      :failure (fn [d] (:error-type d))}
+          results (dev/test-transitions :auth/parse-request
+                    {:success {:input {:http-request {:headers {} :body {"username" "alice" "token" "tok_abc"}}}
+                               :dispatches dispatches}
+                     :failure {:input {:http-request {:headers {} :body {}}}
+                               :dispatches dispatches}})]
       (is (true? (get-in results [:success :pass?])))
       (is (true? (get-in results [:failure :pass?]))))))
 
 (deftest validate-session-test-transitions-test
-  (testing "test-transitions covers both validate-session transitions"
+  (testing "test-transitions covers both validate-session dispatches"
     (with-redefs [db/get-session (fn [_ds token]
                                    (when (= token "tok_valid")
                                      {:user_id "alice" :valid 1}))]
-      (let [results (dev/test-transitions :auth/validate-session
+      (let [dispatches {:authorized   (fn [d] (:session-valid d))
+                        :unauthorized (fn [d] (not (:session-valid d)))}
+            results (dev/test-transitions :auth/validate-session
                       {:authorized   {:input {:user-id "alice" :auth-token "tok_valid"}
-                                      :resources {:db :mock-ds}}
+                                      :resources {:db :mock-ds}
+                                      :dispatches dispatches}
                        :unauthorized {:input {:user-id "alice" :auth-token "bad"}
-                                      :resources {:db :mock-ds}}})]
+                                      :resources {:db :mock-ds}
+                                      :dispatches dispatches}})]
         (is (true? (get-in results [:authorized :pass?])))
         (is (true? (get-in results [:unauthorized :pass?])))))))

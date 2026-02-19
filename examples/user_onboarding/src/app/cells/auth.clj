@@ -13,12 +13,10 @@
                 (if (and user-id token)
                   (assoc data
                          :user-id    user-id
-                         :auth-token token
-                         :mycelium/transition :success)
+                         :auth-token token)
                   (assoc data
                          :error-type    :bad-request
-                         :error-message "Missing username or token"
-                         :mycelium/transition :failure))))})
+                         :error-message "Missing username or token"))))})
 
 (defmethod cell/cell-spec :auth/validate-session [_]
   {:id      :auth/validate-session
@@ -29,13 +27,11 @@
                 (if valid?
                   (assoc data
                          :user-id    (:user_id session)
-                         :session-valid true
-                         :mycelium/transition :authorized)
+                         :session-valid true)
                   (assoc data
                          :session-valid  false
                          :error-type     :unauthorized
-                         :error-message  "Invalid or expired session token"
-                         :mycelium/transition :unauthorized))))})
+                         :error-message  "Invalid or expired session token"))))})
 
 (defmethod cell/cell-spec :auth/extract-session [_]
   {:id      :auth/extract-session
@@ -44,13 +40,10 @@
               (let [qp    (get-in data [:http-request :query-params])
                     token (or (get qp :token) (get qp "token"))]
                 (if token
-                  (assoc data
-                         :auth-token token
-                         :mycelium/transition :success)
+                  (assoc data :auth-token token)
                   (assoc data
                          :error-type    :unauthorized
-                         :error-message "No session token provided"
-                         :mycelium/transition :failure))))})
+                         :error-message "No session token provided"))))})
 
 (defmethod cell/cell-spec :auth/extract-cookie-session [_]
   {:id      :auth/extract-cookie-session
@@ -58,8 +51,5 @@
    :handler (fn [_resources data]
               (let [token (get-in data [:http-request :cookies "session-token" :value])]
                 (if token
-                  (assoc data
-                         :auth-token token
-                         :mycelium/transition :success)
-                  (assoc data
-                         :mycelium/transition :failure))))})
+                  (assoc data :auth-token token)
+                  data)))})

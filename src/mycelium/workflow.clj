@@ -26,13 +26,16 @@
 (defn compile-edges
   "Compiles edge definitions into Maestro dispatch pairs.
    If edges is a keyword → unconditional dispatch to that target.
-   If edges is a map → each entry becomes a predicate checking :mycelium/transition."
-  [edges]
+   If edges is a map → each entry uses the predicate from dispatch-map."
+  [edges dispatch-map]
   (if (keyword? edges)
     [[(resolve-state-id edges) (constantly true)]]
-    (mapv (fn [[transition-kw target]]
-            [(resolve-state-id target)
-             (fn [data] (= (:mycelium/transition data) transition-kw))])
+    (mapv (fn [[label target]]
+            (let [pred (get dispatch-map label)]
+              (when-not pred
+                (throw (ex-info (str "No dispatch for edge label " label)
+                                {:label label})))
+              [(resolve-state-id target) pred]))
           edges)))
 
 ;; ===== Validation =====
@@ -82,42 +85,46 @@
         (throw (ex-info (str "Unreachable cells: " unreachable)
                         {:unreachable unreachable}))))))
 
-(defn- validate-transition-coverage!
-  "Checks that all declared cell transitions are covered by edges,
-   and that all edge keys match declared transitions."
-  [edges-map cells-map]
-  (doseq [[cell-name cell-id] cells-map]
-    (let [cell       (cell/get-cell! cell-id)
-          _          (when (or (nil? (:transitions cell)) (empty? (:transitions cell)))
-                       (throw (ex-info (str "Cell " cell-name " (" cell-id
-                                            ") has no declared transitions")
-                                       {:cell-name cell-name :cell-id cell-id})))
-          edge-def   (get edges-map cell-name)
-          covered    (if (keyword? edge-def)
-                       ;; Unconditional edge covers all transitions
-                       (:transitions cell)
-                       (set (keys edge-def)))
-          declared   (:transitions cell)
-          uncovered  (set/difference declared covered)]
-      (when (seq uncovered)
-        (throw (ex-info (str "Cell " cell-name " (" cell-id ") declares transition(s) "
-                             uncovered " not covered by edges")
-                        {:cell-name cell-name
-                         :cell-id   cell-id
-                         :uncovered uncovered
-                         :declared  declared
-                         :covered   covered})))
-      ;; Check for dead edges (edge keys that don't match any declared transition)
-      (when (map? edge-def)
-        (let [dead-edges (set/difference covered declared)]
-          (when (seq dead-edges)
-            (throw (ex-info (str "Cell " cell-name " (" cell-id ") has edge(s) "
-                                 dead-edges " that don't match any declared transition "
-                                 declared)
-                            {:cell-name  cell-name
-                             :cell-id    cell-id
-                             :dead-edges dead-edges
-                             :declared   declared}))))))))
+(defn- merge-default-dispatches
+  "Merges default dispatches from cell specs into the workflow dispatches.
+   For each cell with map edges and no explicit dispatch, checks the cell spec
+   for :default-dispatches and uses that as fallback."
+  [dispatches-map edges-map cells-map]
+  (reduce (fn [acc [cell-name edge-def]]
+            (if (and (map? edge-def) (not (get acc cell-name)))
+              (let [cell-id (get cells-map cell-name)
+                    cell (when cell-id (cell/get-cell cell-id))]
+                (if-let [defaults (:default-dispatches cell)]
+                  (assoc acc cell-name defaults)
+                  acc))
+              acc))
+          (or dispatches-map {})
+          edges-map))
+
+(defn- validate-dispatch-coverage!
+  "For each cell with map edges, checks dispatch keys match edge keys exactly.
+   Cells with unconditional edges (keyword) need no dispatch entry."
+  [edges-map dispatches-map]
+  (doseq [[cell-name edge-def] edges-map]
+    (when (map? edge-def)
+      (let [edge-keys     (set (keys edge-def))
+            dispatch-map  (get dispatches-map cell-name)
+            dispatch-keys (when dispatch-map (set (keys dispatch-map)))]
+        (when-not dispatch-map
+          (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
+                          {:cell-name cell-name :edge-keys edge-keys})))
+        (let [missing (set/difference edge-keys dispatch-keys)]
+          (when (seq missing)
+            (throw (ex-info (str "Cell " cell-name " has edge(s) " missing
+                                 " with no dispatch predicates")
+                            {:cell-name cell-name :missing missing
+                             :edge-keys edge-keys :dispatch-keys dispatch-keys}))))
+        (let [extra (set/difference dispatch-keys edge-keys)]
+          (when (seq extra)
+            (throw (ex-info (str "Cell " cell-name " has dispatch(es) " extra
+                                 " that don't match any edge")
+                            {:cell-name cell-name :extra extra
+                             :edge-keys edge-keys :dispatch-keys dispatch-keys}))))))))
 
 (defn- get-map-keys
   "Extracts top-level keys from a Malli :map schema. Returns nil if not a :map schema.
@@ -217,45 +224,67 @@
         (throw (ex-info msg {:errors @errors}))))))
 
 (defn validate-workflow
-  "Runs all validations on a workflow definition."
-  [{:keys [cells edges]}]
+  "Runs all validations on a workflow definition.
+   Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
+  [{:keys [cells edges dispatches]}]
   (validate-cells-exist! cells)
   (validate-edge-targets! edges cells)
   (validate-reachability! edges cells)
-  (validate-transition-coverage! edges cells)
+  (let [effective-dispatches (merge-default-dispatches dispatches edges cells)]
+    (validate-dispatch-coverage! edges effective-dispatches))
   (validate-schema-chain! edges cells))
 
 ;; ===== Compilation =====
+
+(defn- build-edge-targets
+  "Builds a reverse map from edge definitions for the post-interceptor.
+   Returns {resolved-state-id → {resolved-target-state-id → transition-label}}.
+   Used to infer which transition was taken from the dispatch target."
+  [edges]
+  (into {}
+    (keep (fn [[cell-name edge-def]]
+            (when (map? edge-def)
+              [(resolve-state-id cell-name)
+               (into {}
+                 (map (fn [[label target]]
+                        [(resolve-state-id target) label]))
+                 edge-def)])))
+    edges))
 
 (defn compile-workflow
   "Compiles a workflow definition into a Maestro FSM.
    Returns the compiled (ready-to-run) FSM."
   ([workflow] (compile-workflow workflow {}))
-  ([{:keys [cells edges] :as workflow} opts]
+  ([{:keys [cells edges dispatches] :as workflow} opts]
    ;; Validate
    (validate-workflow workflow)
-   ;; Build state->cell map (resolved-state-id -> cell-spec)
-   (let [state->cell (into {}
+   ;; Merge default dispatches from cell specs (raw — Maestro handles SCI eval)
+   (let [effective-dispatches (merge-default-dispatches dispatches edges cells)
+         ;; Build state->cell map (resolved-state-id -> cell-spec)
+         state->cell (into {}
                            (map (fn [[cell-name cell-id]]
                                   [(resolve-state-id cell-name)
                                    (cell/get-cell! cell-id)]))
                            cells)
+         ;; Build state->edge-targets for post-interceptor transition lookup
+         state->edge-targets (build-edge-targets edges)
          ;; Build Maestro FSM states
          fsm-states (into {}
                           (map (fn [[cell-name cell-id]]
                                  (let [cell      (cell/get-cell! cell-id)
                                        state-id  (resolve-state-id cell-name)
-                                       edge-def  (get edges cell-name)]
+                                       edge-def  (get edges cell-name)
+                                       dispatch-map (get effective-dispatches cell-name)]
                                    [state-id
                                     (merge
                                      {:handler    (:handler cell)
-                                      :dispatches (compile-edges edge-def)}
+                                      :dispatches (compile-edges edge-def dispatch-map)}
                                      (when (:async? cell)
                                        {:async? true}))])))
                           cells)
          ;; Build interceptors — compose custom pre/post with schema interceptors
          schema-pre  (schema/make-pre-interceptor state->cell)
-         schema-post (schema/make-post-interceptor state->cell)
+         schema-post (schema/make-post-interceptor state->cell state->edge-targets)
          pre  (if-let [custom-pre (:pre opts)]
                 (fn [fsm-state resources]
                   (-> (schema-pre fsm-state resources)

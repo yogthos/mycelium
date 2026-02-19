@@ -10,16 +10,13 @@
                 (assoc data
                        :http-response {:status 200
                                        :body   {:message (str "Welcome, " name "!")
-                                                :profile {:name name :email email}}}
-                       :mycelium/transition :done)))})
+                                                :profile {:name name :email email}}})))})
 
 (defmethod cell/cell-spec :ui/render-login-page [_]
   {:id      :ui/render-login-page
    :doc     "Render the login form page"
    :handler (fn [_resources data]
-              (assoc data
-                     :html (selmer/render-file "templates/login.html" {})
-                     :mycelium/transition :done))})
+              (assoc data :html (selmer/render-file "templates/login.html" {})))})
 
 (defmethod cell/cell-spec :ui/render-dashboard [_]
   {:id      :ui/render-dashboard
@@ -30,8 +27,7 @@
                        :html (selmer/render-file "templates/dashboard.html"
                                                  {:name    name
                                                   :email   email
-                                                  :user-id (:user-id data)})
-                       :mycelium/transition :done)))})
+                                                  :user-id (:user-id data)}))))})
 
 (defmethod cell/cell-spec :ui/render-error [_]
   {:id      :ui/render-error
@@ -53,8 +49,7 @@
                                                  {:status  status
                                                   :title   title
                                                   :message (:error-message data "An unexpected error occurred")})
-                       :error-status status
-                       :mycelium/transition :done)))})
+                       :error-status status)))})
 
 (defmethod cell/cell-spec :ui/render-user-list [_]
   {:id      :ui/render-user-list
@@ -62,8 +57,7 @@
    :handler (fn [_resources data]
               (assoc data
                      :html (selmer/render-file "templates/users.html"
-                                               {:users (:users data)})
-                     :mycelium/transition :done))})
+                                               {:users (:users data)})))})
 
 (defmethod cell/cell-spec :ui/render-user-profile [_]
   {:id      :ui/render-user-profile
@@ -71,5 +65,4 @@
    :handler (fn [_resources data]
               (let [profile (:profile data)]
                 (assoc data
-                       :html (selmer/render-file "templates/profile.html" profile)
-                       :mycelium/transition :done)))})
+                       :html (selmer/render-file "templates/profile.html" profile))))})

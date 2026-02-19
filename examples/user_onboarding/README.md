@@ -63,7 +63,7 @@ graph LR
     err -->|done| stop
 ```
 
-Each box is a **cell** — an isolated unit with a defined handler, input/output schema, and declared transitions. The manifests (`resources/workflows/*.edn`) are the single source of truth for schemas and wiring.
+Each box is a **cell** — an isolated unit with a defined handler and input/output schema. The manifests (`resources/workflows/*.edn`) are the single source of truth for schemas, edges, and dispatch predicates.
 
 ## Project Structure
 
@@ -113,8 +113,8 @@ user_onboarding/
 
 ## How It Works
 
-1. **Cells** (`src/app/cells/`) define handlers and transitions via `defcell` — no schemas here.
-2. **Manifests** (`resources/workflows/*.edn`) declare schemas, edges, and wiring for each cell.
+1. **Cells** (`src/app/cells/`) define handlers via `defmethod cell/cell-spec` — pure data transformations, no routing logic.
+2. **Manifests** (`resources/workflows/*.edn`) declare schemas, edges, and dispatch predicates for each cell.
 3. **Workflow loaders** (`src/app/workflows/`) load manifests and call `manifest->workflow`, which attaches schemas to registered cells and produces compilable workflow definitions.
 4. **Routes** (`src/app/routes.clj`) bridge HTTP requests into workflows. JSON API routes use Muuntaja for content negotiation. HTML routes use a generic `html-handler` that maps workflow results to Ring responses.
 5. **Integrant** (`src/app/core.clj`) manages the system lifecycle: database, migrations, handler, and Jetty server.

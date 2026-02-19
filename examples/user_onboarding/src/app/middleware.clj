@@ -4,11 +4,10 @@
 (defn logging-interceptor
   "Maestro post-interceptor that logs cell transitions."
   [fsm-state _resources]
-  (let [last-state (:last-state-id fsm-state)
-        data       (:data fsm-state)
-        transition (:mycelium/transition data)]
-    (when (and last-state transition)
-      (println (str "[workflow] " last-state " → " transition)))
+  (let [last-state    (:last-state-id fsm-state)
+        current-state (:current-state-id fsm-state)]
+    (when last-state
+      (println (str "[workflow] " last-state " → " current-state)))
     fsm-state))
 
 (def workflow-opts

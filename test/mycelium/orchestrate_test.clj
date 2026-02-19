@@ -13,17 +13,18 @@
             :doc      "Step A"
             :schema   {:input  [:map [:x :int]]
                        :output [:map [:y :int]]}
-            :requires []
-            :transitions #{:next}}
+            :requires []}
            :process
            {:id       :test/step-b
             :doc      "Step B"
             :schema   {:input  [:map [:y :int]]
                        :output [:map [:z :string]]}
-            :requires [:db]
-            :transitions #{:done :error}}}
+            :requires [:db]}}
    :edges {:start   {:next :process}
-           :process {:done :end, :error :error}}})
+           :process {:done :end, :error :error}}
+   :dispatches {:start   {:next (constantly true)}
+                :process {:done  (fn [d] (:z d))
+                          :error (fn [d] (not (:z d)))}}})
 
 ;; ===== 1. cell-briefs returns brief for every cell =====
 
@@ -44,7 +45,7 @@
                  test-manifest :process
                  {:error  "Output missing key :z"
                   :input  {:y 42}
-                  :output {:y 42 :mycelium/transition :done}})]
+                  :output {:y 42}})]
       (is (string? (:prompt brief)))
       (is (re-find #"missing" (:prompt brief)))
       (is (re-find #":z" (:prompt brief)))
@@ -68,10 +69,9 @@
     (defmethod cell/cell-spec :test/step-a [_]
       {:id          :test/step-a
        :handler     (fn [_ data]
-                      (assoc data :y (inc (:x data)) :mycelium/transition :next))
+                      (assoc data :y (inc (:x data))))
        :schema      {:input [:map [:x :int]]
-                     :output [:map [:y :int]]}
-       :transitions #{:next}})
+                     :output [:map [:y :int]]}})
 
     (let [report (orchestrate/progress test-manifest)]
       (is (string? report))

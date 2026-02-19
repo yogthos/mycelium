@@ -10,10 +10,9 @@
 (defn- register-test-cell! []
   (defmethod cell/cell-spec :test/cell-a [_]
     {:id          :test/cell-a
-     :handler     (fn [_ data] (assoc data :y 42 :mycelium/transition :success))
+     :handler     (fn [_ data] (assoc data :y 42))
      :schema      {:input  [:map [:x :int]]
-                   :output [:map [:y :int]]}
-     :transitions #{:success :failure}}))
+                   :output [:map [:y :int]]}}))
 
 ;; ===== validate-input tests =====
 
@@ -35,31 +34,19 @@
     (let [cell (cell/get-cell! :test/cell-a)]
       (is (some? (schema/validate-input cell {:x "not-an-int"}))))))
 
-;; ===== validate-output tests =====
+;; ===== validate-output tests (no dispatches - single schema) =====
 
 (deftest validate-output-passes-valid-test
-  (testing "validate-output passes valid data + valid transition"
+  (testing "validate-output passes valid data (single schema, no dispatches)"
     (register-test-cell!)
     (let [cell (cell/get-cell! :test/cell-a)]
-      (is (nil? (schema/validate-output cell {:y 42 :mycelium/transition :success :extra true}))))))
+      (is (nil? (schema/validate-output cell {:y 42 :extra true}))))))
 
 (deftest validate-output-fails-missing-key-test
   (testing "validate-output fails on missing output key"
     (register-test-cell!)
     (let [cell (cell/get-cell! :test/cell-a)]
-      (is (some? (schema/validate-output cell {:mycelium/transition :success}))))))
-
-(deftest validate-output-fails-invalid-transition-test
-  (testing "validate-output fails on invalid transition keyword"
-    (register-test-cell!)
-    (let [cell (cell/get-cell! :test/cell-a)]
-      (is (some? (schema/validate-output cell {:y 42 :mycelium/transition :bogus}))))))
-
-(deftest validate-output-fails-missing-transition-test
-  (testing "validate-output fails on missing :mycelium/transition"
-    (register-test-cell!)
-    (let [cell (cell/get-cell! :test/cell-a)]
-      (is (some? (schema/validate-output cell {:y 42}))))))
+      (is (some? (schema/validate-output cell {:no-y true}))))))
 
 ;; ===== Pre interceptor tests =====
 
@@ -95,16 +82,16 @@
           (is (= fsm-state (pre fsm-state {}))
               (str "Should skip " terminal)))))))
 
-;; ===== Post interceptor tests =====
+;; ===== Post interceptor tests (single schema, no dispatches) =====
 
 (deftest post-interceptor-passes-valid-test
-  (testing "Post interceptor passes valid output through (looks up cell via :last-state-id)"
+  (testing "Post interceptor passes valid output through"
     (register-test-cell!)
     (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
-          post        (schema/make-post-interceptor state->cell)
+          post        (schema/make-post-interceptor state->cell nil)
           fsm-state   {:last-state-id    :test/cell-a
                        :current-state-id :some/next
-                       :data             {:x 10 :y 42 :mycelium/transition :success}
+                       :data             {:x 10 :y 42}
                        :trace            []}]
       (is (= fsm-state (post fsm-state {}))))))
 
@@ -112,23 +99,10 @@
   (testing "Post interceptor catches invalid output → redirects to ::fsm/error"
     (register-test-cell!)
     (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
-          post        (schema/make-post-interceptor state->cell)
+          post        (schema/make-post-interceptor state->cell nil)
           fsm-state   {:last-state-id    :test/cell-a
                        :current-state-id :some/next
-                       :data             {:x 10 :mycelium/transition :success}
-                       :trace            []}
-          result      (post fsm-state {})]
-      (is (= ::fsm/error (:current-state-id result)))
-      (is (some? (get-in result [:data :mycelium/schema-error]))))))
-
-(deftest post-interceptor-catches-bad-transition-test
-  (testing "Post interceptor catches bad transition → redirects to ::fsm/error"
-    (register-test-cell!)
-    (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
-          post        (schema/make-post-interceptor state->cell)
-          fsm-state   {:last-state-id    :test/cell-a
-                       :current-state-id :some/next
-                       :data             {:x 10 :y 42 :mycelium/transition :bogus}
+                       :data             {:x 10}
                        :trace            []}
           result      (post fsm-state {})]
       (is (= ::fsm/error (:current-state-id result)))
@@ -143,8 +117,8 @@
           result   (promise)
           err      (promise)
           wrapped  (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
-      (wrapped {:y 42 :mycelium/transition :success})
-      (is (= {:y 42 :mycelium/transition :success} (deref result 1000 :timeout)))
+      (wrapped {:y 42})
+      (is (= {:y 42} (deref result 1000 :timeout)))
       (is (= :timeout (deref err 100 :timeout))))))
 
 (deftest wrap-async-callback-rejects-invalid-test
@@ -154,7 +128,7 @@
           result   (promise)
           err      (promise)
           wrapped  (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
-      (wrapped {:mycelium/transition :success}) ;; missing :y
+      (wrapped {:no-y true}) ;; missing :y
       (is (= :timeout (deref result 100 :timeout)))
       (is (not= :timeout (deref err 1000 :timeout))))))
 
@@ -164,8 +138,7 @@
   (testing "Returns nil when cell has no output schema"
     (defmethod cell/cell-spec :test/no-out [_]
       {:id          :test/no-out
-       :handler     (fn [_ data] data)
-       :transitions #{:ok}})
+       :handler     (fn [_ data] data)})
     (let [cell (cell/get-cell! :test/no-out)]
       (is (nil? (schema/output-schema-for-transition cell :ok))))))
 
@@ -183,8 +156,7 @@
        :handler     (fn [_ data] data)
        :schema      {:input  [:map [:x :int]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
-                              :not-found [:map [:error-message :string]]}}
-       :transitions #{:found :not-found}})
+                              :not-found [:map [:error-message :string]]}}})
     (let [cell (cell/get-cell! :test/per-trans)]
       (is (= [:map [:profile [:map [:name :string]]]]
              (schema/output-schema-for-transition cell :found)))
@@ -197,12 +169,11 @@
     (defmethod cell/cell-spec :test/kw-out [_]
       {:id          :test/kw-out
        :handler     (fn [_ data] data)
-       :schema      {:input :map :output :map}
-       :transitions #{:ok}})
+       :schema      {:input :map :output :map}})
     (let [cell (cell/get-cell! :test/kw-out)]
       (is (= :map (schema/output-schema-for-transition cell :ok))))))
 
-;; ===== Per-transition validate-output tests =====
+;; ===== Per-transition validate-output tests (with transition label) =====
 
 (defn- register-per-transition-cell! []
   (defmethod cell/cell-spec :test/pt-cell [_]
@@ -210,80 +181,90 @@
      :handler     (fn [_ data] data)
      :schema      {:input  [:map [:x :int]]
                    :output {:success   [:map [:y :int]]
-                            :failure   [:map [:error-message :string]]}}
-     :transitions #{:success :failure}}))
+                            :failure   [:map [:error-message :string]]}}}))
 
 (deftest validate-output-per-transition-passes-test
-  (testing "Per-transition schema passes correct data for matching transition"
+  (testing "Per-transition schema passes correct data for given transition label"
     (register-per-transition-cell!)
     (let [cell (cell/get-cell! :test/pt-cell)]
-      (is (nil? (schema/validate-output cell {:y 42 :mycelium/transition :success})))
-      (is (nil? (schema/validate-output cell {:error-message "oops" :mycelium/transition :failure}))))))
+      (is (nil? (schema/validate-output cell {:y 42} :success)))
+      (is (nil? (schema/validate-output cell {:error-message "oops"} :failure))))))
 
 (deftest validate-output-per-transition-rejects-wrong-data-test
-  (testing "Per-transition schema rejects wrong data for a transition"
+  (testing "Per-transition schema rejects wrong data for given transition label"
     (register-per-transition-cell!)
     (let [cell (cell/get-cell! :test/pt-cell)]
-      ;; :success transition but missing :y
-      (is (some? (schema/validate-output cell {:error-message "oops" :mycelium/transition :success})))
-      ;; :failure transition but missing :error-message
-      (is (some? (schema/validate-output cell {:y 42 :mycelium/transition :failure}))))))
+      ;; :success transition but :y is wrong type
+      (is (some? (schema/validate-output cell {:y "not-int"} :success)))
+      ;; :failure transition but :error-message is wrong type
+      (is (some? (schema/validate-output cell {:error-message 42} :failure))))))
 
-(deftest validate-output-per-transition-rejects-unknown-transition-test
-  (testing "Per-transition schema rejects transition not in transitions set"
+(deftest validate-output-per-transition-no-label-any-match-test
+  (testing "Per-transition schema with no transition label passes if any schema matches"
     (register-per-transition-cell!)
     (let [cell (cell/get-cell! :test/pt-cell)]
-      (is (some? (schema/validate-output cell {:y 42 :mycelium/transition :bogus}))))))
+      ;; Data matches :success schema — should pass even without label
+      (is (nil? (schema/validate-output cell {:y 42})))
+      ;; Data matches neither schema — should fail
+      (is (some? (schema/validate-output cell {:x 1}))))))
 
-;; ===== Post interceptor with per-transition schema =====
+;; ===== Post interceptor with per-transition schema + edge targets =====
 
 (deftest post-interceptor-per-transition-passes-test
-  (testing "Post interceptor uses correct transition-specific schema"
+  (testing "Post interceptor infers transition from :current-state-id to select correct schema"
     (register-per-transition-cell!)
-    (let [state->cell {:test/pt-cell (cell/get-cell! :test/pt-cell)}
-          post        (schema/make-post-interceptor state->cell)
-          ;; :success path with :y
+    (let [state->cell        {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          ;; Reverse map: state → {target → label}
+          state->edge-targets {:test/pt-cell {:some/success-target :success
+                                              :some/failure-target :failure}}
+          post                (schema/make-post-interceptor state->cell state->edge-targets)
+          ;; :success path — current-state-id is success target
           fsm-state-s {:last-state-id    :test/pt-cell
-                       :current-state-id :some/next
-                       :data             {:y 42 :mycelium/transition :success}}
-          ;; :failure path with :error-message
+                       :current-state-id :some/success-target
+                       :data             {:y 42}}
+          ;; :failure path — current-state-id is failure target
           fsm-state-f {:last-state-id    :test/pt-cell
-                       :current-state-id :some/next
-                       :data             {:error-message "oops" :mycelium/transition :failure}}]
+                       :current-state-id :some/failure-target
+                       :data             {:error-message "oops"}}]
       (is (= fsm-state-s (post fsm-state-s {})))
       (is (= fsm-state-f (post fsm-state-f {}))))))
 
 (deftest post-interceptor-per-transition-rejects-test
-  (testing "Post interceptor rejects data that doesn't match transition-specific schema"
+  (testing "Post interceptor rejects data that doesn't match transition-selected schema"
     (register-per-transition-cell!)
-    (let [state->cell {:test/pt-cell (cell/get-cell! :test/pt-cell)}
-          post        (schema/make-post-interceptor state->cell)
+    (let [state->cell        {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          state->edge-targets {:test/pt-cell {:some/success-target :success
+                                              :some/failure-target :failure}}
+          post                (schema/make-post-interceptor state->cell state->edge-targets)
+          ;; Routed to success target but :y is wrong type
           fsm-state   {:last-state-id    :test/pt-cell
-                       :current-state-id :some/next
-                       :data             {:error-message "oops" :mycelium/transition :success}}
+                       :current-state-id :some/success-target
+                       :data             {:y "not-int"}}
           result      (post fsm-state {})]
       (is (= ::fsm/error (:current-state-id result))))))
 
 ;; ===== Async callback with per-transition schema =====
 
 (deftest wrap-async-callback-per-transition-forwards-test
-  (testing "wrap-async-callback forwards valid output for per-transition schema"
+  (testing "wrap-async-callback forwards valid output for per-transition schema (any-match)"
     (register-per-transition-cell!)
     (let [cell    (cell/get-cell! :test/pt-cell)
           result  (promise)
           err     (promise)
           wrapped (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
-      (wrapped {:error-message "oops" :mycelium/transition :failure})
-      (is (= {:error-message "oops" :mycelium/transition :failure} (deref result 1000 :timeout)))
+      ;; Matches :failure schema — passes via any-match fallback
+      (wrapped {:error-message "oops"})
+      (is (= {:error-message "oops"} (deref result 1000 :timeout)))
       (is (= :timeout (deref err 100 :timeout))))))
 
 (deftest wrap-async-callback-per-transition-rejects-test
-  (testing "wrap-async-callback rejects invalid output for per-transition schema"
+  (testing "wrap-async-callback rejects data matching no output schema"
     (register-per-transition-cell!)
     (let [cell    (cell/get-cell! :test/pt-cell)
           result  (promise)
           err     (promise)
           wrapped (schema/wrap-async-callback cell #(deliver result %) #(deliver err %))]
-      (wrapped {:y 42 :mycelium/transition :failure}) ;; :failure needs :error-message, not :y
+      ;; Matches neither :success nor :failure schema
+      (wrapped {:x 1})
       (is (= :timeout (deref result 100 :timeout)))
       (is (not= :timeout (deref err 1000 :timeout))))))

@@ -17,20 +17,27 @@
     (with-redefs [db/get-user (fn [_ds user-id]
                                 (when (= user-id "alice")
                                   {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
-      (let [result (dev/test-cell :user/fetch-profile
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            result (dev/test-cell :user/fetch-profile
                     {:input {:user-id "alice" :session-valid true}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
         (is (= {:name "Alice Smith" :email "alice@example.com"}
-               (get-in result [:output :profile])))))))
+               (get-in result [:output :profile])))
+        (is (= :found (:matched-dispatch result)))))))
 
 (deftest fetch-profile-not-found-test
   (testing "fetch-profile returns not-found with error context"
     (with-redefs [db/get-user (fn [_ds _user-id] nil)]
-      (let [result (dev/test-cell :user/fetch-profile
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            result (dev/test-cell :user/fetch-profile
                     {:input {:user-id "nobody" :session-valid true}
-                     :resources {:db :mock-ds}})]
-        (is (= :not-found (get-in result [:output :mycelium/transition])))
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
+        (is (= :not-found (:matched-dispatch result)))
         (is (= :not-found (get-in result [:output :error-type])))
         (is (string? (get-in result [:output :error-message])))))))
 
@@ -39,58 +46,75 @@
     (with-redefs [db/get-all-users (fn [_ds]
                                      [{:id "alice" :name "Alice Smith" :email "alice@example.com"}
                                       {:id "bob" :name "Bob Jones" :email "bob@example.com"}])]
-      (let [result (dev/test-cell :user/fetch-all-users
+      (let [dispatches {:done (fn [_] true)}
+            result (dev/test-cell :user/fetch-all-users
                     {:input {}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
         (is (= 2 (count (get-in result [:output :users]))))
-        (is (= :done (get-in result [:output :mycelium/transition])))))))
+        (is (= :done (:matched-dispatch result)))))))
 
 (deftest fetch-profile-by-id-found-test
   (testing "fetch-profile-by-id returns full profile when user exists"
     (with-redefs [db/get-user (fn [_ds user-id]
                                 (when (= user-id "alice")
                                   {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
-      (let [result (dev/test-cell :user/fetch-profile-by-id
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            result (dev/test-cell :user/fetch-profile-by-id
                     {:input {:http-request {:path-params {:id "alice"}}}
-                     :resources {:db :mock-ds}})]
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
         (is (:pass? result))
         (is (= {:id "alice" :name "Alice Smith" :email "alice@example.com"}
-               (get-in result [:output :profile])))))))
+               (get-in result [:output :profile])))
+        (is (= :found (:matched-dispatch result)))))))
 
 (deftest fetch-profile-by-id-not-found-test
   (testing "fetch-profile-by-id returns not-found with error context"
     (with-redefs [db/get-user (fn [_ds _user-id] nil)]
-      (let [result (dev/test-cell :user/fetch-profile-by-id
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            result (dev/test-cell :user/fetch-profile-by-id
                     {:input {:http-request {:path-params {:id "nobody"}}}
-                     :resources {:db :mock-ds}})]
-        (is (= :not-found (get-in result [:output :mycelium/transition])))
+                     :resources {:db :mock-ds}
+                     :dispatches dispatches})]
+        (is (= :not-found (:matched-dispatch result)))
         (is (= :not-found (get-in result [:output :error-type])))))))
 
 ;; ===== test-transitions for multi-transition cells =====
 
 (deftest fetch-profile-test-transitions-test
-  (testing "test-transitions covers both fetch-profile transitions"
+  (testing "test-transitions covers both fetch-profile dispatches"
     (with-redefs [db/get-user (fn [_ds user-id]
                                 (when (= user-id "alice")
                                   {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
-      (let [results (dev/test-transitions :user/fetch-profile
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            results (dev/test-transitions :user/fetch-profile
                       {:found     {:input {:user-id "alice" :session-valid true}
-                                   :resources {:db :mock-ds}}
+                                   :resources {:db :mock-ds}
+                                   :dispatches dispatches}
                        :not-found {:input {:user-id "nobody" :session-valid true}
-                                   :resources {:db :mock-ds}}})]
+                                   :resources {:db :mock-ds}
+                                   :dispatches dispatches}})]
         (is (true? (get-in results [:found :pass?])))
         (is (true? (get-in results [:not-found :pass?])))))))
 
 (deftest fetch-profile-by-id-test-transitions-test
-  (testing "test-transitions covers both fetch-profile-by-id transitions"
+  (testing "test-transitions covers both fetch-profile-by-id dispatches"
     (with-redefs [db/get-user (fn [_ds user-id]
                                 (when (= user-id "alice")
                                   {:id "alice" :name "Alice Smith" :email "alice@example.com"}))]
-      (let [results (dev/test-transitions :user/fetch-profile-by-id
+      (let [dispatches {:found     (fn [d] (:profile d))
+                        :not-found (fn [d] (:error-type d))}
+            results (dev/test-transitions :user/fetch-profile-by-id
                       {:found     {:input {:http-request {:path-params {:id "alice"}}}
-                                   :resources {:db :mock-ds}}
+                                   :resources {:db :mock-ds}
+                                   :dispatches dispatches}
                        :not-found {:input {:http-request {:path-params {:id "nobody"}}}
-                                   :resources {:db :mock-ds}}})]
+                                   :resources {:db :mock-ds}
+                                   :dispatches dispatches}})]
         (is (true? (get-in results [:found :pass?])))
         (is (true? (get-in results [:not-found :pass?])))))))

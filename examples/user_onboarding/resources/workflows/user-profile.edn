@@ -14,8 +14,7 @@
                        :not-found [:map
                                     [:error-type :keyword]
                                     [:error-message :string]]}}
-   :requires [:db]
-   :transitions #{:found :not-found}}
+   :requires [:db]}
 
   :render-profile
   {:id       :ui/render-user-profile
@@ -27,8 +26,7 @@
                           [:email :string]]]]
               :output [:map
                         [:html :string]]}
-   :requires []
-   :transitions #{:done}}
+   :requires []}
 
   :render-error
   {:id       :ui/render-error
@@ -37,11 +35,16 @@
               :output [:map
                         [:html :string]
                         [:error-status :int]]}
-   :requires []
-   :transitions #{:done}}}
+   :requires []}}
 
  :edges
  {:start          {:found     :render-profile
                    :not-found :render-error}
   :render-profile {:done :end}
-  :render-error   {:done :end}}}
+  :render-error   {:done :end}}
+
+ :dispatches
+ {:start          {:found     (fn [data] (:profile data))
+                   :not-found (fn [data] (:error-type data))}
+  :render-profile {:done (fn [_] true)}
+  :render-error   {:done (fn [_] true)}}}

@@ -29,29 +29,15 @@
 
 (defn- validate-output-schema!
   "Validates an output schema which may be a single schema (vector) or per-transition map.
-   If a map, validates each value as a Malli schema and optionally checks keys match transitions."
-  [output-schema transitions label]
+   If a map, validates each value as a Malli schema."
+  [output-schema label]
   (cond
     (vector? output-schema)
     (validate-schema! output-schema label)
 
     (map? output-schema)
-    (do
-      (doseq [[k v] output-schema]
-        (validate-schema! v (str label " transition " k)))
-      (when transitions
-        (let [schema-keys  (set (keys output-schema))
-              trans-set    (set transitions)
-              extra        (clojure.set/difference schema-keys trans-set)
-              missing      (clojure.set/difference trans-set schema-keys)]
-          (when (seq extra)
-            (throw (ex-info (str "Output schema has keys " extra
-                                 " not in transitions " trans-set " for " label)
-                            {:label label :extra extra :transitions trans-set})))
-          (when (seq missing)
-            (throw (ex-info (str "Output schema missing keys " missing
-                                 " for transitions " trans-set " in " label)
-                            {:label label :missing missing :transitions trans-set}))))))
+    (doseq [[k v] output-schema]
+      (validate-schema! v (str label " transition " k)))
 
     :else
     (validate-schema! output-schema label)))
@@ -80,36 +66,30 @@
   (when-not (cell-spec cell-id)
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
-  (let [transitions (:transitions (get-cell cell-id))]
-    (when (:input schema)
-      (validate-schema! (:input schema) (str cell-id " :input")))
-    (when (:output schema)
-      (validate-output-schema! (:output schema) transitions (str cell-id " :output"))))
+  (when (:input schema)
+    (validate-schema! (:input schema) (str cell-id " :input")))
+  (when (:output schema)
+    (validate-output-schema! (:output schema) (str cell-id " :output")))
   (swap! cell-overrides update cell-id merge {:schema schema})
   schema)
 
 (defn set-cell-meta!
-  "Sets metadata overrides (schema, transitions, requires) on a registered cell.
+  "Sets metadata overrides (schema, requires) on a registered cell.
    The manifest calls this to inject metadata into cells that were registered
-   without transitions/requires. Validates transitions are non-empty and schema
-   is well-formed. Throws if the cell is not found."
-  [cell-id {:keys [schema transitions requires] :as meta-map}]
+   without schemas/requires. Validates schema is well-formed.
+   Throws if the cell is not found."
+  [cell-id {:keys [schema requires] :as meta-map}]
   (when-not (cell-spec cell-id)
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
-  (when (and (some? transitions) (empty? transitions))
-    (throw (ex-info (str "Cell " cell-id " must declare non-empty transitions")
-                    {:id cell-id})))
   (when schema
-    (let [effective-transitions (or transitions (:transitions (get-cell cell-id)))]
-      (when (:input schema)
-        (validate-schema! (:input schema) (str cell-id " :input")))
-      (when (:output schema)
-        (validate-output-schema! (:output schema) effective-transitions (str cell-id " :output")))))
+    (when (:input schema)
+      (validate-schema! (:input schema) (str cell-id " :input")))
+    (when (:output schema)
+      (validate-output-schema! (:output schema) (str cell-id " :output"))))
   (let [overrides (cond-> {}
-                    schema      (assoc :schema schema)
-                    transitions (assoc :transitions transitions)
-                    requires    (assoc :requires requires))]
+                    schema   (assoc :schema schema)
+                    requires (assoc :requires requires))]
     (swap! cell-overrides update cell-id merge overrides))
   meta-map)
 
@@ -117,4 +97,3 @@
   "Returns a seq of all registered cell IDs."
   []
   (keys (dissoc (methods cell-spec) :default)))
-
