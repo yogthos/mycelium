@@ -22,9 +22,9 @@
             :requires [:db]}}
    :edges {:start   {:success :process, :failure :error}
            :process {:done :end}}
-   :dispatches {:start   {:success (fn [data] (:y data))
-                           :failure (fn [data] (not (:y data)))}
-                :process {:done (constantly true)}}})
+   :dispatches {:start   [[:success (fn [data] (:y data))]
+                           [:failure (fn [data] (not (:y data)))]]
+                :process [[:done (constantly true)]]}})
 
 ;; ===== 1. Valid manifest passes validation =====
 
@@ -115,9 +115,9 @@
    :edges {:start  {:found     :render
                     :not-found :error}
            :render {:done :end}}
-   :dispatches {:start  {:found     (fn [d] (:profile d))
-                          :not-found (fn [d] (:error-message d))}
-                :render {:done (constantly true)}}})
+   :dispatches {:start  [[:found     (fn [d] (:profile d))]
+                          [:not-found (fn [d] (:error-message d))]]
+                :render [[:done (constantly true)]]}})
 
 (deftest per-transition-manifest-validates-test
   (testing "Manifest with per-transition output passes validation"
@@ -147,18 +147,18 @@
 (deftest missing-dispatch-for-edge-test
   (testing "Missing dispatch predicate for a map edge label is rejected"
     (let [bad (assoc valid-manifest :dispatches
-                     {:start {:success (fn [d] (:y d))}  ;; missing :failure
-                      :process {:done (constantly true)}})]
+                     {:start [[:success (fn [d] (:y d))]]  ;; missing :failure
+                      :process [[:done (constantly true)]]})]
       (is (thrown-with-msg? Exception #"[Dd]ispatch"
             (manifest/validate-manifest bad))))))
 
 (deftest extra-dispatch-for-edge-test
   (testing "Extra dispatch key not in edges is rejected"
     (let [bad (assoc valid-manifest :dispatches
-                     {:start {:success (fn [d] (:y d))
-                              :failure (fn [d] (not (:y d)))
-                              :extra   (fn [d] d)}
-                      :process {:done (constantly true)}})]
+                     {:start [[:success (fn [d] (:y d))]
+                              [:failure (fn [d] (not (:y d)))]
+                              [:extra   (fn [d] d)]]
+                      :process [[:done (constantly true)]]})]
       (is (thrown-with-msg? Exception #"[Dd]ispatch"
             (manifest/validate-manifest bad))))))
 

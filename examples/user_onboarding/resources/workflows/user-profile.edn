@@ -44,7 +44,7 @@
   :render-error   {:done :end}}
 
  :dispatches
- {:start          {:found     (fn [data] (:profile data))
-                   :not-found (fn [data] (:error-type data))}
-  :render-profile {:done (fn [_] true)}
-  :render-error   {:done (fn [_] true)}}}
+ {:start          [[:found     (fn [data] (:profile data))]
+                   [:not-found (fn [data] (:error-type data))]]
+  :render-profile [[:done (fn [_] true)]]
+  :render-error   [[:done (fn [_] true)]]}}

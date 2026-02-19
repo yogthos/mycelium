@@ -30,5 +30,5 @@
   :render-list {:done :end}}
 
  :dispatches
- {:start       {:done (fn [_] true)}
-  :render-list {:done (fn [_] true)}}}
+ {:start       [[:done (fn [_] true)]]
+  :render-list [[:done (fn [_] true)]]}}
