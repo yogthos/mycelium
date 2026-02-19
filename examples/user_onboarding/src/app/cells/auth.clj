@@ -22,12 +22,11 @@
   {:id      :auth/validate-session
    :doc     "Check credentials against the session store"
    :handler (fn [{:keys [db]} data]
-              (let [session (db/get-session db (:auth-token data))
-                    valid?  (and session (= 1 (:valid session)))]
-                (if valid?
+              (let [session (db/get-session db (:auth-token data))]
+                (if (and session (= 1 (:valid session)))
                   (assoc data
-                         :user-id    (:user_id session)
-                         :session-valid true)
+                         :user-id        (:user_id session)
+                         :session-valid  true)
                   (assoc data
                          :session-valid  false
                          :error-type     :unauthorized
@@ -50,6 +49,5 @@
    :doc     "Extract auth token from session-token cookie"
    :handler (fn [_resources data]
               (let [token (get-in data [:http-request :cookies "session-token" :value])]
-                (if token
-                  (assoc data :auth-token token)
-                  data)))})
+                (cond-> data
+                  token (assoc :auth-token token))))})

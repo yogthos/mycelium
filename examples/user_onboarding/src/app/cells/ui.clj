@@ -34,16 +34,10 @@
    :doc     "Render a styled error page"
    :handler (fn [_resources data]
               (let [error-type (:error-type data :server-error)
-                    status     (case error-type
-                                 :bad-request   400
-                                 :unauthorized  401
-                                 :not-found     404
-                                 500)
-                    title      (case error-type
-                                 :bad-request   "Bad Request"
-                                 :unauthorized  "Unauthorized"
-                                 :not-found     "Not Found"
-                                 "Server Error")]
+                    errors     {:bad-request  {:status 400 :title "Bad Request"}
+                                :unauthorized {:status 401 :title "Unauthorized"}
+                                :not-found    {:status 404 :title "Not Found"}}
+                    {:keys [status title]} (get errors error-type {:status 500 :title "Server Error"})]
                 (assoc data
                        :html (selmer/render-file "templates/error.html"
                                                  {:status  status

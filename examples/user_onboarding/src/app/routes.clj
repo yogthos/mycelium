@@ -38,11 +38,11 @@
   (fn [request]
     (let [result   (login/run-login-submit db request)
           response (html-response result)]
-      (if (and (:session-valid result) (:auth-token result))
-        (assoc response :cookies {"session-token" {:value     (:auth-token result)
-                                                   :path      "/"
-                                                   :http-only true}})
-        response))))
+      (cond-> response
+        (and (:session-valid result) (:auth-token result))
+        (assoc :cookies {"session-token" {:value     (:auth-token result)
+                                          :path      "/"
+                                          :http-only true}})))))
 
 (defn app [db]
   (ring/ring-handler
@@ -54,25 +54,15 @@
       ["/onboarding" {:post {:handler (onboarding-handler db)}}]]
 
      ;; HTML routes — no Muuntaja, raw Ring responses
-     ["/" {:get {:handler (html-handler
-                            (fn [request]
-                              (home/run-home db request)))}}]
+     ["/" {:get {:handler (html-handler #(home/run-home db %))}}]
 
-     ["/login" {:get  {:handler (html-handler
-                                 (fn [_request]
-                                   (login/run-login-page)))}
+     ["/login" {:get  {:handler (html-handler (fn [_] (login/run-login-page)))}
                 :post {:handler (login-submit-handler db)}}]
 
-     ["/dashboard" {:get {:handler (html-handler
-                                    (fn [request]
-                                      (dashboard/run-dashboard db request)))}}]
+     ["/dashboard" {:get {:handler (html-handler #(dashboard/run-dashboard db %))}}]
 
-     ["/users" {:get {:handler (html-handler
-                                (fn [_request]
-                                  (users/run-user-list db)))}}]
+     ["/users" {:get {:handler (html-handler (fn [_] (users/run-user-list db)))}}]
 
-     ["/users/:id" {:get {:handler (html-handler
-                                    (fn [request]
-                                      (users/run-user-profile db request)))}}]])
+     ["/users/:id" {:get {:handler (html-handler #(users/run-user-profile db %))}}]])
    (ring/create-default-handler)
    {:middleware [params/wrap-params cookies/wrap-cookies mw/wrap-errors]}))
