@@ -7,25 +7,29 @@
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
 ;; --- Helpers ---
+;; Handlers no longer set :mycelium/transition — they just compute data.
+;; Dispatch predicates in the workflow definition determine routing.
 (defn- register-cells! []
   (defmethod cell/cell-spec :test/cell-a [_]
     {:id :test/cell-a
-     :handler (fn [_ data] (assoc data :a-done true :mycelium/transition :success))
+     :handler (fn [_ data] (assoc data :a-done true))
      :schema {:input [:map [:x :int]]
-              :output [:map [:a-done :boolean]]}
-     :transitions #{:success :failure}})
+              :output [:map [:a-done :boolean]]}})
   (defmethod cell/cell-spec :test/cell-b [_]
     {:id :test/cell-b
-     :handler (fn [_ data] (assoc data :b-done true :mycelium/transition :success))
+     :handler (fn [_ data] (assoc data :b-done true))
      :schema {:input [:map [:a-done :boolean]]
-              :output [:map [:b-done :boolean]]}
-     :transitions #{:success}})
+              :output [:map [:b-done :boolean]]}})
   (defmethod cell/cell-spec :test/cell-c [_]
     {:id :test/cell-c
-     :handler (fn [_ data] (assoc data :c-done true :mycelium/transition :done))
+     :handler (fn [_ data] (assoc data :c-done true))
      :schema {:input [:map [:b-done :boolean]]
-              :output [:map [:c-done :boolean]]}
-     :transitions #{:done}}))
+              :output [:map [:c-done :boolean]]}})
+  (defmethod cell/cell-spec :test/cell-d [_]
+    {:id :test/cell-d
+     :handler (fn [_ data] (assoc data :d-done true))
+     :schema {:input [:map [:a-done :boolean]]
+              :output [:map [:d-done :boolean]]}}))
 
 ;; ===== resolve-state-id tests =====
 
@@ -42,37 +46,50 @@
 
 ;; ===== compile-edges tests =====
 
-(deftest compile-edges-map-test
-  (testing "compile-edges with map → correct dispatch predicates"
+(deftest compile-edges-with-dispatch-map-test
+  (testing "compile-edges with dispatch map → predicates route based on data, not :mycelium/transition"
     (let [edges {:success :validate, :failure :error}
-          dispatches (wf/compile-edges edges)]
+          dispatch-map {:success (fn [data] (:a-done data))
+                        :failure (fn [data] (not (:a-done data)))}
+          dispatches (wf/compile-edges edges dispatch-map)]
       (is (= 2 (count dispatches)))
       ;; Each dispatch is [target-id pred-fn]
       (let [[target pred] (first dispatches)]
         (is (qualified-keyword? target))
-        (is (true? (pred {:mycelium/transition :success})))
-        (is (false? (pred {:mycelium/transition :failure})))))))
+        ;; Predicate checks data, not :mycelium/transition
+        (is (true? (pred {:a-done true})))
+        (is (not (pred {:a-done false})))))))
 
 (deftest compile-edges-keyword-test
-  (testing "compile-edges with keyword → unconditional dispatch"
-    (let [dispatches (wf/compile-edges :end)]
+  (testing "compile-edges with keyword → unconditional dispatch (no dispatch map needed)"
+    (let [dispatches (wf/compile-edges :end nil)]
       (is (= 1 (count dispatches)))
       (let [[target pred] (first dispatches)]
         (is (= ::fsm/end target))
         (is (true? (pred {})))
         (is (true? (pred {:anything "works"})))))))
 
+(deftest compile-edges-missing-dispatch-throws-test
+  (testing "compile-edges throws when dispatch map missing a label"
+    (is (thrown-with-msg? Exception #"No dispatch for edge label"
+          (wf/compile-edges {:success :end, :failure :error}
+                            {:success (fn [data] (:ok data))})))))
+
 ;; ===== Linear workflow compilation =====
 
 (deftest linear-workflow-compiles-test
-  (testing "Linear workflow (A→B→C→end) compiles to valid Maestro spec"
+  (testing "Linear workflow (A→B→C→end) compiles with :dispatches"
     (register-cells!)
-    (let [workflow {:cells {:start :test/cell-a
+    (let [workflow {:cells {:start  :test/cell-a
                            :step-b :test/cell-b
                            :step-c :test/cell-c}
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
-                            :step-c {:done :end}}}
+                            :step-c {:done :end}}
+                    :dispatches {:start  {:success (fn [data] (:a-done data))
+                                          :failure (fn [data] (not (:a-done data)))}
+                                 :step-b {:success (constantly true)}
+                                 :step-c {:done (constantly true)}}}
           compiled (wf/compile-workflow workflow)]
       (is (some? compiled))
       (is (map? compiled)))))
@@ -98,18 +115,40 @@
                     :step-b   :test/cell-b
                     :orphan   :test/cell-c}
             :edges {:start  {:success :step-b, :failure :error}
-                    :step-b {:success :end}}})))))
+                    :step-b {:success :end}}
+            :dispatches {:start  {:success (fn [d] (:a-done d))
+                                  :failure (fn [d] (not (:a-done d)))}
+                         :step-b {:success (constantly true)}}})))))
 
-;; ===== Validation: missing edge branch =====
+;; ===== Validation: missing dispatch for edge =====
 
-(deftest validate-catches-missing-edge-branch-test
-  (testing "Validate catches missing edge branch (cell declares transition not in edges)"
+(deftest validate-catches-missing-dispatch-test
+  (testing "Validate catches missing dispatch for map edge"
     (register-cells!)
-    ;; cell-a declares #{:success :failure} but edges only cover :success
-    (is (thrown-with-msg? Exception #"transition"
+    ;; edges has :success and :failure but dispatches only has :success
+    (is (thrown-with-msg? Exception #"[Dd]ispatch"
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
-            :edges {:start {:success :end}}})))))
+            :edges {:start {:success :end, :failure :error}}
+            :dispatches {:start {:success (fn [d] (:a-done d))}}})))))
+
+(deftest validate-catches-extra-dispatch-test
+  (testing "Validate catches extra dispatch key not in edges"
+    (register-cells!)
+    (is (thrown-with-msg? Exception #"[Dd]ispatch"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :edges {:start {:success :end}}
+            :dispatches {:start {:success (fn [d] (:a-done d))
+                                 :extra   (fn [d] (:x d))}}})))))
+
+(deftest validate-no-dispatches-for-map-edges-test
+  (testing "Validate catches map edges with no :dispatches key at all"
+    (register-cells!)
+    (is (thrown-with-msg? Exception #"[Dd]ispatch"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :edges {:start {:success :end, :failure :error}}})))))
 
 ;; ===== Schema chain validation =====
 
@@ -121,7 +160,11 @@
                             :step-c :test/cell-c}
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
-                            :step-c {:done :end}}}]
+                            :step-c {:done :end}}
+                    :dispatches {:start  {:success (fn [d] (:a-done d))
+                                          :failure (fn [d] (not (:a-done d)))}
+                                 :step-b {:success (constantly true)}
+                                 :step-c {:done (constantly true)}}}]
       ;; Should not throw
       (is (some? (wf/compile-workflow workflow))))))
 
@@ -129,41 +172,38 @@
   (testing "Schema chain validation catches missing upstream key with detailed error"
     (defmethod cell/cell-spec :test/needs-z [_]
       {:id :test/needs-z
-       :handler (fn [_ data] (assoc data :w true :mycelium/transition :ok))
+       :handler (fn [_ data] (assoc data :w true))
        :schema {:input [:map [:z :string]]
-                :output [:map [:w :boolean]]}
-       :transitions #{:ok}})
+                :output [:map [:w :boolean]]}})
     (defmethod cell/cell-spec :test/produces-a [_]
       {:id :test/produces-a
-       :handler (fn [_ data] (assoc data :a-val 1 :mycelium/transition :next))
+       :handler (fn [_ data] (assoc data :a-val 1))
        :schema {:input [:map [:x :int]]
-                :output [:map [:a-val :int]]}
-       :transitions #{:next}})
+                :output [:map [:a-val :int]]}})
     (is (thrown-with-msg? Exception #"[Ss]chema chain"
           (wf/compile-workflow
            {:cells {:start  :test/produces-a
                     :step-2 :test/needs-z}
             :edges {:start  {:next :step-2}
-                    :step-2 {:ok :end}}})))))
+                    :step-2 {:ok :end}}
+            :dispatches {:start  {:next (constantly true)}
+                         :step-2 {:ok (constantly true)}}})))))
 
 ;; ===== Branching workflow =====
 
 (deftest branching-workflow-compiles-test
-  (testing "Branching workflow compiles correctly"
+  (testing "Branching workflow compiles correctly with dispatches"
     (register-cells!)
-    ;; Register a cell compatible with branch from :start (needs :a-done from cell-a output)
-    (defmethod cell/cell-spec :test/cell-d [_]
-      {:id :test/cell-d
-       :handler (fn [_ data] (assoc data :d-done true :mycelium/transition :done))
-       :schema {:input [:map [:a-done :boolean]]
-                :output [:map [:d-done :boolean]]}
-       :transitions #{:done}})
     (let [workflow {:cells {:start  :test/cell-a
                             :path-b :test/cell-b
                             :path-d :test/cell-d}
                     :edges {:start  {:success :path-b, :failure :path-d}
                             :path-b {:success :end}
-                            :path-d {:done :end}}}
+                            :path-d {:done :end}}
+                    :dispatches {:start  {:success (fn [d] (:a-done d))
+                                          :failure (fn [d] (not (:a-done d)))}
+                                 :path-b {:success (constantly true)}
+                                 :path-d {:done (constantly true)}}}
           compiled (wf/compile-workflow workflow)]
       (is (some? compiled)))))
 
@@ -175,18 +215,9 @@
     (is (thrown-with-msg? Exception #"[Ii]nvalid edge target"
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
-            :edges {:start {:success :nonexistent-cell, :failure :error}}})))))
-
-;; ===== Dead edge detection =====
-
-(deftest dead-edge-detected-test
-  (testing "Edge key that doesn't match any declared transition is rejected"
-    (register-cells!)
-    ;; cell-a declares #{:success :failure}, edge has :typo which is not a declared transition
-    (is (thrown-with-msg? Exception #"don't match"
-          (wf/compile-workflow
-           {:cells {:start :test/cell-a}
-            :edges {:start {:success :end, :failure :error, :typo :error}}})))))
+            :edges {:start {:success :nonexistent-cell, :failure :error}}
+            :dispatches {:start {:success (fn [d] (:a-done d))
+                                 :failure (fn [d] (not (:a-done d)))}}})))))
 
 ;; ===== Per-transition schema chain validation =====
 
@@ -195,24 +226,21 @@
     {:id :test/lookup
      :handler (fn [_ data]
                 (if (= (:id data) "alice")
-                  (assoc data :profile {:name "Alice"} :mycelium/transition :found)
-                  (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+                  (assoc data :profile {:name "Alice"})
+                  (assoc data :error-message "Not found")))
      :schema {:input [:map [:id :string]]
               :output {:found     [:map [:profile [:map [:name :string]]]]
-                       :not-found [:map [:error-message :string]]}}
-     :transitions #{:found :not-found}})
+                       :not-found [:map [:error-message :string]]}}})
   (defmethod cell/cell-spec :test/render-profile [_]
     {:id :test/render-profile
-     :handler (fn [_ data] (assoc data :html "ok" :mycelium/transition :done))
+     :handler (fn [_ data] (assoc data :html "ok"))
      :schema {:input [:map [:profile [:map [:name :string]]]]
-              :output [:map [:html :string]]}
-     :transitions #{:done}})
+              :output [:map [:html :string]]}})
   (defmethod cell/cell-spec :test/render-error [_]
     {:id :test/render-error
-     :handler (fn [_ data] (assoc data :html "error" :mycelium/transition :done))
+     :handler (fn [_ data] (assoc data :html "error"))
      :schema {:input [:map [:error-message :string]]
-              :output [:map [:html :string]]}
-     :transitions #{:done}}))
+              :output [:map [:html :string]]}}))
 
 (deftest per-transition-schema-chain-valid-test
   (testing "Per-transition schemas — valid workflow compiles"
@@ -223,13 +251,16 @@
                     :edges {:start          {:found :render-profile
                                              :not-found :render-error}
                             :render-profile {:done :end}
-                            :render-error   {:done :end}}}]
+                            :render-error   {:done :end}}
+                    :dispatches {:start          {:found     (fn [d] (:profile d))
+                                                  :not-found (fn [d] (:error-message d))}
+                                 :render-profile {:done (constantly true)}
+                                 :render-error   {:done (constantly true)}}}]
       (is (some? (wf/compile-workflow workflow))))))
 
 (deftest per-transition-schema-chain-catches-missing-key-test
   (testing "Not-found path missing keys downstream cell needs → caught"
     (register-per-transition-cells!)
-    ;; :render-profile needs :profile, but on :not-found path only :error-message is available
     ;; Wire :not-found to :render-profile (which needs :profile) — should fail
     (is (thrown-with-msg? Exception #"[Ss]chema chain"
           (wf/compile-workflow
@@ -237,14 +268,14 @@
                     :render-profile :test/render-profile}
             :edges {:start          {:found :render-profile
                                      :not-found :render-profile}
-                    :render-profile {:done :end}}})))))
+                    :render-profile {:done :end}}
+            :dispatches {:start          {:found     (fn [d] (:profile d))
+                                          :not-found (fn [d] (:error-message d))}
+                         :render-profile {:done (constantly true)}}})))))
 
 (deftest per-transition-schema-chain-two-paths-independent-test
   (testing "Two paths have different keys, each validates independently"
     (register-per-transition-cells!)
-    ;; :found → render-profile (needs :profile ✓)
-    ;; :not-found → render-error (needs :error-message ✓)
-    ;; Both paths are valid independently
     (is (some? (wf/compile-workflow
                 {:cells {:start         :test/lookup
                          :render-profile :test/render-profile
@@ -252,7 +283,11 @@
                  :edges {:start          {:found :render-profile
                                           :not-found :render-error}
                          :render-profile {:done :end}
-                         :render-error   {:done :end}}})))))
+                         :render-error   {:done :end}}
+                 :dispatches {:start          {:found     (fn [d] (:profile d))
+                                               :not-found (fn [d] (:error-message d))}
+                              :render-profile {:done (constantly true)}
+                              :render-error   {:done (constantly true)}}})))))
 
 (deftest single-vector-schema-chain-still-works-test
   (testing "Single vector output schema still works in chain validation"
@@ -262,7 +297,11 @@
                             :step-c :test/cell-c}
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
-                            :step-c {:done :end}}}]
+                            :step-c {:done :end}}
+                    :dispatches {:start  {:success (fn [d] (:a-done d))
+                                          :failure (fn [d] (not (:a-done d)))}
+                                 :step-b {:success (constantly true)}
+                                 :step-c {:done (constantly true)}}}]
       (is (some? (wf/compile-workflow workflow))))))
 
 ;; ===== Map schema with Malli properties =====
@@ -271,20 +310,31 @@
   (testing "Schema chain works when :map schema has Malli properties like {:closed true}"
     (defmethod cell/cell-spec :test/props-producer [_]
       {:id :test/props-producer
-       :handler (fn [_ data] (assoc data :y 1 :mycelium/transition :done))
+       :handler (fn [_ data] (assoc data :y 1))
        :schema {:input [:map [:x :int]]
-                :output [:map [:y :int]]}
-       :transitions #{:done}})
+                :output [:map [:y :int]]}})
     (defmethod cell/cell-spec :test/props-consumer [_]
       {:id :test/props-consumer
-       :handler (fn [_ data] (assoc data :z 1 :mycelium/transition :done))
+       :handler (fn [_ data] (assoc data :z 1))
        :schema {:input [:map {:closed true} [:y :int]]
-                :output [:map [:z :int]]}
-       :transitions #{:done}})
-    ;; Should compile without schema chain error — {:closed true} is a Malli
-    ;; property map, not a key requirement
+                :output [:map [:z :int]]}})
     (is (some? (wf/compile-workflow
                 {:cells {:start  :test/props-producer
                          :step-2 :test/props-consumer}
                  :edges {:start  {:done :step-2}
-                         :step-2 {:done :end}}})))))
+                         :step-2 {:done :end}}
+                 :dispatches {:start  {:done (constantly true)}
+                              :step-2 {:done (constantly true)}}})))))
+
+;; ===== Unconditional edges don't need dispatches =====
+
+(deftest unconditional-edge-no-dispatch-needed-test
+  (testing "Unconditional edges (keyword target) need no dispatch entry"
+    (defmethod cell/cell-spec :test/simple [_]
+      {:id :test/simple
+       :handler (fn [_ data] (assoc data :done true))
+       :schema {:input [:map] :output [:map [:done :boolean]]}})
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start :test/simple}
+                     :edges {:start :end}})]
+      (is (some? compiled)))))

@@ -4,13 +4,19 @@
             [mycelium.workflow :as wf]
             [maestro.core :as fsm]))
 
+(def workflow-cell-dispatches
+  "Default dispatch predicates for composed workflow cells.
+   Routes :success when no error, :failure when :mycelium/error is present."
+  {:success (fn [data] (not (:mycelium/error data)))
+   :failure (fn [data] (some? (:mycelium/error data)))})
+
 (defn workflow->cell
   "Wraps a workflow definition as a cell spec.
    The resulting cell runs the child workflow to completion and returns
-   :success or :failure transition.
+   data with :mycelium/error on failure for dispatch routing.
 
    `cell-id`  - the ID for the resulting cell
-   `workflow`  - workflow definition map {:cells ... :edges ...}
+   `workflow`  - workflow definition map {:cells ... :edges ... :dispatches ...}
    `schema`    - {:input [...] :output [...]} for the cell"
   [cell-id workflow schema]
   (let [compiled (wf/compile-workflow workflow
@@ -28,26 +34,23 @@
         handler (fn [resources data]
                   (try
                     (let [result (fsm/run compiled resources {:data data})]
-                      (if (:mycelium/error result)
-                        (assoc result :mycelium/transition :failure)
-                        (assoc result :mycelium/transition :success)))
+                      result)
                     (catch Exception e
                       (-> data
-                          (assoc :mycelium/error (ex-message e)
-                                 :mycelium/transition :failure)))))]
-    {:id          cell-id
-     :handler     handler
+                          (assoc :mycelium/error (ex-message e))))))]
+    {:id                 cell-id
+     :handler            handler
      ;; Use the provided input schema but make output open (:map)
      ;; because on :failure the output won't match the happy-path schema.
      ;; The child workflow's own interceptors enforce output schemas internally.
-     :schema      {:input (:input schema) :output :map}
-     :transitions #{:success :failure}}))
+     :schema             {:input (:input schema) :output :map}
+     :default-dispatches workflow-cell-dispatches}))
 
 (defn register-workflow-cell!
   "Creates a workflow-as-cell and registers it in the cell registry.
 
    `cell-id`  - the ID for the resulting cell
-   `workflow`  - workflow definition map {:cells ... :edges ...}
+   `workflow`  - workflow definition map {:cells ... :edges ... :dispatches ...}
    `schema`    - {:input [...] :output [...]} for the cell"
   [cell-id workflow schema]
   (let [spec (workflow->cell cell-id workflow schema)]

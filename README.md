@@ -2,7 +2,7 @@
 
 Schema-enforced, composable workflow components for Clojure. Built on [Maestro](https://github.com/yogthos/maestro).
 
-Mycelium structures applications as directed graphs of pure data transformations. Each node (cell) has explicit input/output schemas and declared transitions. Cells are developed and tested in complete isolation, then composed into workflows that are validated at compile time.
+Mycelium structures applications as directed graphs of pure data transformations. Each node (cell) has explicit input/output schemas. Cells are developed and tested in complete isolation, then composed into workflows that are validated at compile time. Routing between cells is determined by dispatch predicates defined at the workflow level — handlers compute data, the graph decides where it goes.
 
 ## Why
 
@@ -26,22 +26,20 @@ A cell is a pure function with schema contracts, registered via `defmethod`:
 (defmethod cell/cell-spec :math/double [_]
   {:id          :math/double
    :handler     (fn [_resources data]
-                  (assoc data :result (* 2 (:x data)) :mycelium/transition :done))
+                  (assoc data :result (* 2 (:x data))))
    :schema      {:input  [:map [:x :int]]
-                 :output [:map [:result :int]]}
-   :transitions #{:done}})
+                 :output [:map [:result :int]]}})
 
 (defmethod cell/cell-spec :math/add-ten [_]
   {:id          :math/add-ten
    :handler     (fn [_resources data]
-                  (assoc data :result (+ 10 (:result data)) :mycelium/transition :done))
+                  (assoc data :result (+ 10 (:result data))))
    :schema      {:input  [:map [:result :int]]
-                 :output [:map [:result :int]]}
-   :transitions #{:done}})
+                 :output [:map [:result :int]]}})
 ```
 
 Cells must:
-- Return the data map with `:mycelium/transition` set to one of their declared transitions
+- Return the data map with any computed values added
 - Produce output satisfying their `:output` schema on every path
 - Only use resources passed via the first argument
 
@@ -54,7 +52,9 @@ Cells must:
                {:cells {:start  :math/double
                         :add    :math/add-ten}
                 :edges {:start {:done :add}
-                        :add   {:done :end}}}
+                        :add   {:done :end}}
+                :dispatches {:start {:done (constantly true)}
+                             :add   {:done (constantly true)}}}
                {}          ;; resources
                {:x 5})]    ;; initial data
   (:result result))
@@ -63,17 +63,15 @@ Cells must:
 
 ### Branching
 
-Edges map transition keywords to targets:
+Edges map transition labels to targets. Dispatch predicates examine the data to determine which edge to take:
 
 ```clojure
 (defmethod cell/cell-spec :check/threshold [_]
   {:id          :check/threshold
    :handler     (fn [_ data]
-                  (assoc data :mycelium/transition
-                         (if (> (:value data) 10) :high :low)))
+                  (assoc data :above-threshold (> (:value data) 10)))
    :schema      {:input  [:map [:value :int]]
-                 :output [:map]}
-   :transitions #{:high :low}})
+                 :output [:map]}})
 
 (myc/run-workflow
   {:cells {:start :check/threshold
@@ -81,26 +79,34 @@ Edges map transition keywords to targets:
            :small :process/small-values}
    :edges {:start {:high :big, :low :small}
            :big   {:done :end}
-           :small {:done :end}}}
+           :small {:done :end}}
+   :dispatches {:start {:high (fn [data] (:above-threshold data))
+                        :low  (fn [data] (not (:above-threshold data)))}
+                :big   {:done (constantly true)}
+                :small {:done (constantly true)}}}
   {} {:value 42})
 ```
 
+Handlers compute data; dispatch predicates decide the route. This keeps business logic decoupled from graph navigation.
+
 ### Per-Transition Output Schemas
 
-Cells with multiple transitions can declare different output schemas for each transition:
+Cells with multiple outgoing edges can declare different output schemas for each transition:
 
 ```clojure
 (defmethod cell/cell-spec :user/fetch [_]
   {:id          :user/fetch
    :handler     (fn [{:keys [db]} data]
                   (if-let [profile (get-user db (:user-id data))]
-                    (assoc data :profile profile :mycelium/transition :found)
-                    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
-   :transitions #{:found :not-found}
+                    (assoc data :profile profile)
+                    (assoc data :error-message "Not found")))
+   :schema      {:input  [:map [:user-id :string]]
+                 :output {:found     [:map [:profile [:map [:name :string] [:email :string]]]]
+                          :not-found [:map [:error-message :string]]}}
    :requires    [:db]})
 ```
 
-In the manifest, use a map instead of a vector for `:output`:
+In the workflow, per-transition schemas are validated based on which dispatch matched:
 
 ```clojure
 ;; Single schema (all transitions must satisfy it)
@@ -122,9 +128,11 @@ External dependencies are injected, never acquired by cells:
   {:id          :user/fetch
    :handler     (fn [{:keys [db]} data]
                   (if-let [profile (get-user db (:user-id data))]
-                    (assoc data :profile profile :mycelium/transition :found)
-                    (assoc data :error-message "Not found" :mycelium/transition :not-found)))
-   :transitions #{:found :not-found}
+                    (assoc data :profile profile)
+                    (assoc data :error-message "Not found")))
+   :schema      {:input  [:map [:user-id :string]]
+                 :output {:found     [:map [:profile [:map [:name :string] [:email :string]]]]
+                          :not-found [:map [:error-message :string]]}}
    :requires    [:db]})
 
 ;; Resources are passed at run time
@@ -140,12 +148,11 @@ External dependencies are injected, never acquired by cells:
                   (future
                     (try
                       (let [resp (http/get (:url data))]
-                        (callback (assoc data :response resp :mycelium/transition :ok)))
+                        (callback (assoc data :response resp)))
                       (catch Exception e
                         (error-callback e)))))
    :schema      {:input  [:map [:url :string]]
                  :output [:map [:response map?]]}
-   :transitions #{:ok :error}
    :async?      true})
 ```
 
@@ -156,8 +163,7 @@ External dependencies are injected, never acquired by cells:
 - **Cell existence** — all referenced cells must be registered
 - **Edge targets** — all targets must point to valid cells or `:end`/`:error`/`:halt`
 - **Reachability** — every cell must be reachable from `:start`
-- **Transition coverage** — every declared transition must have a corresponding edge
-- **Dead edge detection** — edge keys must match declared transitions
+- **Dispatch coverage** — every edge label must have a corresponding dispatch predicate, and vice versa
 - **Schema chain** — each cell's input keys must be available from upstream outputs
 
 ```
@@ -170,7 +176,7 @@ but only #{:http-request} available
 Pre and post interceptors validate every transition automatically:
 
 - **Pre**: validates input data against the cell's `:input` schema before the handler runs
-- **Post**: validates output data against `:output` schema and checks `:mycelium/transition` is declared
+- **Post**: validates output data against `:output` schema, using the dispatch target to select per-transition schemas
 
 Schema violations redirect to the error state with detailed diagnostics attached at `:mycelium/schema-error`.
 
@@ -186,20 +192,25 @@ Workflows can be nested as cells in parent workflows:
   :auth/flow
   {:cells {:start :auth/parse, :validate :auth/check}
    :edges {:start {:ok :validate, :fail :error}
-           :validate {:ok :end, :fail :error}}}
+           :validate {:ok :end, :fail :error}}
+   :dispatches {:start    {:ok   (fn [data] (:user-id data))
+                           :fail (fn [data] (:error data))}
+                :validate {:ok   (fn [data] (:session-valid data))
+                           :fail (fn [data] (not (:session-valid data)))}}}
   {:input  [:map [:http-request map?]]
    :output [:map [:user-id :string]]})
 
-;; Use it in a parent workflow
+;; Use it in a parent workflow — composed cells provide :default-dispatches
 (myc/run-workflow
   {:cells {:start :auth/flow
            :main  :app/dashboard}
    :edges {:start {:success :main, :failure :error}
-           :main  {:done :end}}}
+           :main  {:done :end}}
+   :dispatches {:main {:done (constantly true)}}}
   resources initial-data)
 ```
 
-Child workflows produce `:success` or `:failure` transitions. On failure, `:mycelium/error` is attached to the data. Child execution traces are preserved at `:mycelium/child-trace`.
+Child workflows produce `:success` or `:failure` based on whether `:mycelium/error` is present in the data. Composed cells carry `:default-dispatches` that `compile-workflow` uses as fallback when no explicit dispatches are provided for that position. Child execution traces are preserved at `:mycelium/child-trace`.
 
 ## Manifest System
 
@@ -211,17 +222,21 @@ Define workflows as pure data in `.edn` files:
  :cells {:start {:id :auth/parse-request
                  :doc "Extract credentials from HTTP request"
                  :schema {:input  [:map [:http-request map?]]
-                          :output [:map [:user-id :string] [:auth-token :string]]}
-                 :transitions #{:success :failure}}
+                          :output [:map [:user-id :string] [:auth-token :string]]}}
          :validate {:id :auth/validate-session
                     :doc "Check credentials"
                     :schema {:input  [:map [:user-id :string] [:auth-token :string]]
                              :output [:map [:session-valid :boolean]]}
-                    :requires [:db]
-                    :transitions #{:authorized :unauthorized}}}
+                    :requires [:db]}}
  :edges {:start    {:success :validate, :failure :error}
-         :validate {:authorized :end, :unauthorized :error}}}
+         :validate {:authorized :end, :unauthorized :error}}
+ :dispatches {:start    {:success (fn [data] (:user-id data))
+                         :failure (fn [data] (not (:user-id data)))}
+              :validate {:authorized   (fn [data] (:session-valid data))
+                         :unauthorized (fn [data] (not (:session-valid data)))}}}
 ```
+
+Dispatch predicates in EDN are `(fn ...)` forms compiled by Maestro's built-in SCI evaluator.
 
 Load and validate:
 
@@ -259,11 +274,13 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
    :resources {}})
 ;; => {:pass? true, :output {...}, :errors [], :duration-ms 0.42}
 
-;; Verify expected transition
+;; With dispatch predicates to verify which edge matches
 (dev/test-cell :auth/parse-request
-  {:input               {:http-request {:headers {} :body {}}}
-   :expected-transition :failure})
-;; => {:pass? true, ...} if handler returns :failure
+  {:input      {:http-request {:headers {} :body {"username" "alice"}}}
+   :dispatches {:success (fn [d] (:user-id d))
+                :failure (fn [d] (not (:user-id d)))}
+   :expected-dispatch :success})
+;; => {:pass? true, :matched-dispatch :success, ...}
 ```
 
 ### Test Multiple Transitions
@@ -271,11 +288,15 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 ```clojure
 (dev/test-transitions :user/fetch-profile
   {:found     {:input {:user-id "alice" :session-valid true}
-               :resources {:db my-db}}
+               :resources {:db my-db}
+               :dispatches {:found     (fn [d] (:profile d))
+                            :not-found (fn [d] (:error-type d))}}
    :not-found {:input {:user-id "nobody" :session-valid true}
-               :resources {:db my-db}}})
-;; => {:found     {:pass? true, :output {...}}
-;;     :not-found {:pass? true, :output {...}}}
+               :resources {:db my-db}
+               :dispatches {:found     (fn [d] (:profile d))
+                            :not-found (fn [d] (:error-type d))}}})
+;; => {:found     {:pass? true, :matched-dispatch :found, :output {...}}
+;;     :not-found {:pass? true, :matched-dispatch :not-found, :output {...}}}
 ```
 
 ### Enumerate Workflow Paths
@@ -314,7 +335,7 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 (orch/reassignment-brief manifest :validate
   {:error "Output missing key :session-valid"
    :input {:user-id "alice" :auth-token "tok_abc"}
-   :output {:mycelium/transition :authorized}})
+   :output {:session-valid nil}})
 
 ;; Execution plan
 (orch/plan manifest)
@@ -337,7 +358,7 @@ mycelium/
 │   ├── dev.clj            ;; Testing harness, visualization
 │   ├── orchestrate.clj    ;; Agent orchestration helpers
 │   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 95 tests, 195 assertions
+└── test/mycelium/         ;; 104 tests, 210 assertions
 ```
 
 ## License

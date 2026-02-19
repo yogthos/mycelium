@@ -13,8 +13,7 @@
                        :failure [:map
                                   [:error-type :keyword]
                                   [:error-message :string]]}}
-   :requires []
-   :transitions #{:success :failure}}
+   :requires []}
 
   :validate-session
   {:id       :auth/validate-session
@@ -28,8 +27,7 @@
                                        [:session-valid :boolean]
                                        [:error-type :keyword]
                                        [:error-message :string]]}}
-   :requires [:db]
-   :transitions #{:authorized :unauthorized}}
+   :requires [:db]}
 
   :fetch-profile
   {:id       :user/fetch-profile
@@ -42,8 +40,7 @@
                        :not-found [:map
                                     [:error-type :keyword]
                                     [:error-message :string]]}}
-   :requires [:db]
-   :transitions #{:found :not-found}}
+   :requires [:db]}
 
   :render-dashboard
   {:id       :ui/render-dashboard
@@ -54,8 +51,7 @@
                           [:email :string]]]]
               :output [:map
                         [:html :string]]}
-   :requires []
-   :transitions #{:done}}
+   :requires []}
 
   :render-error
   {:id       :ui/render-error
@@ -64,8 +60,7 @@
               :output [:map
                         [:html :string]
                         [:error-status :int]]}
-   :requires []
-   :transitions #{:done}}}
+   :requires []}}
 
  :edges
  {:start            {:success :validate-session
@@ -75,4 +70,14 @@
   :fetch-profile    {:found     :render-dashboard
                      :not-found :render-error}
   :render-dashboard {:done :end}
-  :render-error     {:done :end}}}
+  :render-error     {:done :end}}
+
+ :dispatches
+ {:start            {:success (fn [data] (:auth-token data))
+                     :failure (fn [data] (:error-type data))}
+  :validate-session {:authorized   (fn [data] (:session-valid data))
+                     :unauthorized (fn [data] (not (:session-valid data)))}
+  :fetch-profile    {:found     (fn [data] (:profile data))
+                     :not-found (fn [data] (:error-type data))}
+  :render-dashboard {:done (fn [_] true)}
+  :render-error     {:done (fn [_] true)}}}

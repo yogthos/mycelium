@@ -15,8 +15,7 @@
                        :failure [:map
                                   [:error-type :keyword]
                                   [:error-message :string]]}}
-   :requires []
-   :transitions #{:success :failure}}
+   :requires []}
 
   :validate-session
   {:id       :auth/validate-session
@@ -31,8 +30,7 @@
                                        [:session-valid :boolean]
                                        [:error-type :keyword]
                                        [:error-message :string]]}}
-   :requires [:db]
-   :transitions #{:authorized :unauthorized}}
+   :requires [:db]}
 
   :fetch-profile
   {:id       :user/fetch-profile
@@ -47,8 +45,7 @@
                        :not-found [:map
                                     [:error-type :keyword]
                                     [:error-message :string]]}}
-   :requires [:db]
-   :transitions #{:found :not-found}}
+   :requires [:db]}
 
   :render-home
   {:id       :ui/render-home
@@ -61,8 +58,7 @@
                         [:http-response [:map
                           [:status :int]
                           [:body map?]]]]}
-   :requires []
-   :transitions #{:done}}}
+   :requires []}}
 
  :edges
  {:start            {:success :validate-session
@@ -71,4 +67,13 @@
                      :unauthorized :error}
   :fetch-profile    {:found     :render-home
                      :not-found :error}
-  :render-home      {:done :end}}}
+  :render-home      {:done :end}}
+
+ :dispatches
+ {:start            {:success (fn [data] (:auth-token data))
+                     :failure (fn [data] (:error-type data))}
+  :validate-session {:authorized   (fn [data] (:session-valid data))
+                     :unauthorized (fn [data] (not (:session-valid data)))}
+  :fetch-profile    {:found     (fn [data] (:profile data))
+                     :not-found (fn [data] (:error-type data))}
+  :render-home      {:done (fn [_] true)}}}

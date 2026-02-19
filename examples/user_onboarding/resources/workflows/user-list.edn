@@ -11,8 +11,7 @@
                           [:id :string]
                           [:name :string]
                           [:email :string]]]]]}
-   :requires [:db]
-   :transitions #{:done}}
+   :requires [:db]}
 
   :render-list
   {:id       :ui/render-user-list
@@ -24,9 +23,12 @@
                           [:email :string]]]]]
               :output [:map
                         [:html :string]]}
-   :requires []
-   :transitions #{:done}}}
+   :requires []}}
 
  :edges
  {:start       {:done :render-list}
-  :render-list {:done :end}}}
+  :render-list {:done :end}}
+
+ :dispatches
+ {:start       {:done (fn [_] true)}
+  :render-list {:done (fn [_] true)}}}

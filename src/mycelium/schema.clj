@@ -34,36 +34,47 @@
       :else            output)))
 
 (defn validate-output
-  "Validates data against the cell's output schema and transition.
-   Returns nil if valid (or if no output schema is defined), or an error map if invalid.
-   Supports both single-schema (vector) and per-transition (map) output schemas.
-   Transition validation is always performed regardless of schema presence."
-  [cell data]
-  (let [transition  (:mycelium/transition data)
-        transitions (:transitions cell)]
-    (cond
-      (nil? transition)
-      {:cell-id (:id cell)
-       :phase   :output
-       :errors  "Missing :mycelium/transition in output data"
-       :data    data}
+  "Validates data against the cell's output schema.
+   When transition is provided and output is a per-transition map, validates
+   against that specific transition's schema.
+   When transition is nil and output is a map, validates against all schemas
+   (passes if any match).
+   Returns nil if valid, or an error map if invalid."
+  ([cell data]
+   (validate-output cell data nil))
+  ([cell data transition]
+   (let [output (get-in cell [:schema :output])]
+     (cond
+       ;; No output schema — always passes
+       (nil? output) nil
 
-      (or (nil? transitions) (not (contains? transitions transition)))
-      {:cell-id (:id cell)
-       :phase   :output
-       :errors  (if (nil? transitions)
-                  (str "Cell " (:id cell) " has no declared transitions")
-                  (str "Invalid transition " transition
-                       ", expected one of " transitions))
-       :data    data}
+       ;; Per-transition output schema (map)
+       (map? output)
+       (if transition
+         ;; Validate against the specific transition's schema
+         (when-let [schema (get output transition)]
+           (when-let [explanation (m/explain schema data)]
+             {:cell-id (:id cell)
+              :phase   :output
+              :errors  (me/humanize explanation)
+              :data    data}))
+         ;; No transition known — validate against all schemas, pass if any matches
+         (let [schemas (vals output)]
+           (when (every? (fn [schema]
+                           (some? (m/explain schema data)))
+                         schemas)
+             {:cell-id (:id cell)
+              :phase   :output
+              :errors  (str "Data does not match any output schema for " (:id cell))
+              :data    data})))
 
-      :else
-      (when-let [schema (output-schema-for-transition cell transition)]
-        (when-let [explanation (m/explain schema data)]
-          {:cell-id (:id cell)
-           :phase   :output
-           :errors  (me/humanize explanation)
-           :data    data})))))
+       ;; Single schema (vector or keyword)
+       :else
+       (when-let [explanation (m/explain output data)]
+         {:cell-id (:id cell)
+          :phase   :output
+          :errors  (me/humanize explanation)
+          :data    data})))))
 
 (defn make-pre-interceptor
   "Creates a Maestro pre-interceptor that validates input schemas.
@@ -85,24 +96,33 @@
 (defn make-post-interceptor
   "Creates a Maestro post-interceptor that validates output schemas.
    Uses :last-state-id to look up the cell that just ran.
+   `state->edge-targets` maps state-id → {target-state-id → transition-label},
+   used to infer which transition was taken from :current-state-id (set by Maestro
+   after dispatch evaluation).
    Skips terminal states."
-  [state->cell]
+  [state->cell state->edge-targets]
   (fn [fsm-state _resources]
     (let [state-id (:last-state-id fsm-state)]
       (if (or (nil? state-id)
               (contains? terminal-states state-id))
         fsm-state
         (if-let [cell (get state->cell state-id)]
-          (if-let [error (validate-output cell (:data fsm-state))]
-            (-> fsm-state
-                (assoc :current-state-id ::fsm/error)
-                (assoc-in [:data :mycelium/schema-error] error))
-            fsm-state)
+          (let [transition (when state->edge-targets
+                             (get-in state->edge-targets
+                                     [state-id (:current-state-id fsm-state)]))
+                error (validate-output cell (:data fsm-state) transition)]
+            (if error
+              (-> fsm-state
+                  (assoc :current-state-id ::fsm/error)
+                  (assoc-in [:data :mycelium/schema-error] error))
+              fsm-state))
           fsm-state)))))
 
 (defn wrap-async-callback
   "Wraps an async cell's callback to validate output before forwarding.
-   If validation fails, calls error-callback with an ex-info."
+   If validation fails, calls error-callback with an ex-info.
+   For per-transition output schemas, falls back to 'any schema matches' validation
+   since the transition target is not known until dispatch."
   [cell original-callback error-callback]
   (fn [data]
     (if-let [error (validate-output cell data)]

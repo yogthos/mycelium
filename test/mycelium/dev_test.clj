@@ -12,10 +12,9 @@
     (defmethod cell/cell-spec :dev/good-cell [_]
       {:id          :dev/good-cell
        :handler     (fn [_ data]
-                      (assoc data :y (* 2 (:x data)) :mycelium/transition :ok))
+                      (assoc data :y (* 2 (:x data))))
        :schema      {:input [:map [:x :int]]
-                     :output [:map [:y :int]]}
-       :transitions #{:ok}})
+                     :output [:map [:y :int]]}})
 
     (let [result (dev/test-cell :dev/good-cell
                                 {:input {:x 5}
@@ -32,10 +31,9 @@
       {:id          :dev/bad-cell
        :handler     (fn [_ data]
                       ;; Returns :y as int instead of string
-                      (assoc data :y 42 :mycelium/transition :ok))
+                      (assoc data :y 42))
        :schema      {:input [:map [:x :int]]
-                     :output [:map [:y :string]]}
-       :transitions #{:ok}})
+                     :output [:map [:y :string]]}})
 
     (let [result (dev/test-cell :dev/bad-cell
                                 {:input {:x 5}
@@ -48,8 +46,8 @@
 (deftest workflow-to-dot-test
   (testing "workflow->dot produces valid DOT graph string"
     (let [manifest {:id :test/wf
-                    :cells {:start   {:id :test/a :transitions #{:success :failure}}
-                            :process {:id :test/b :transitions #{:done}}}
+                    :cells {:start   {:id :test/a}
+                            :process {:id :test/b}}
                     :edges {:start   {:success :process, :failure :error}
                             :process {:done :end}}}
           dot (dev/workflow->dot manifest)]
@@ -69,80 +67,117 @@
           dot (dev/workflow->dot manifest)]
       (is (re-find #"\"fetch-profile\"" dot)))))
 
-;; ===== test-cell with :expected-transition =====
+;; ===== test-cell with :dispatches option =====
 
-(deftest test-cell-expected-transition-pass-test
-  (testing "test-cell with :expected-transition passes when transition matches"
-    (defmethod cell/cell-spec :dev/trans-cell [_]
-      {:id          :dev/trans-cell
+(deftest test-cell-with-dispatches-test
+  (testing "test-cell with :dispatches evaluates predicates and reports matched edge"
+    (defmethod cell/cell-spec :dev/dispatch-cell [_]
+      {:id          :dev/dispatch-cell
        :handler     (fn [_ data]
-                      (assoc data :y 1 :mycelium/transition :ok))
-       :schema      {:input [:map [:x :int]]
-                     :output [:map [:y :int]]}
-       :transitions #{:ok :fail}})
-    (let [result (dev/test-cell :dev/trans-cell
-                                {:input {:x 5}
-                                 :expected-transition :ok})]
-      (is (true? (:pass? result))))))
+                      (if (= (:id data) "alice")
+                        (assoc data :profile {:name "Alice"})
+                        (assoc data :error-message "Not found")))
+       :schema      {:input [:map [:id :string]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}})
+    (let [dispatches {:found     (fn [d] (:profile d))
+                      :not-found (fn [d] (:error-message d))}
+          result (dev/test-cell :dev/dispatch-cell
+                                {:input {:id "alice"}
+                                 :dispatches dispatches})]
+      (is (true? (:pass? result)))
+      (is (= :found (:matched-dispatch result))))))
 
-(deftest test-cell-expected-transition-fail-test
-  (testing "test-cell with :expected-transition fails when transition doesn't match"
-    (defmethod cell/cell-spec :dev/trans-cell2 [_]
-      {:id          :dev/trans-cell2
+(deftest test-cell-with-dispatches-failure-test
+  (testing "test-cell with :dispatches reports :not-found dispatch for not-found data"
+    (defmethod cell/cell-spec :dev/dispatch-cell2 [_]
+      {:id          :dev/dispatch-cell2
        :handler     (fn [_ data]
-                      (assoc data :y 1 :mycelium/transition :ok))
-       :schema      {:input [:map [:x :int]]
-                     :output [:map [:y :int]]}
-       :transitions #{:ok :fail}})
-    (let [result (dev/test-cell :dev/trans-cell2
-                                {:input {:x 5}
-                                 :expected-transition :fail})]
-      (is (false? (:pass? result)))
-      (is (some #(= :transition (:phase %)) (:errors result))))))
+                      (assoc data :error-message "Not found"))
+       :schema      {:input [:map [:id :string]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}})
+    (let [dispatches {:found     (fn [d] (:profile d))
+                      :not-found (fn [d] (:error-message d))}
+          result (dev/test-cell :dev/dispatch-cell2
+                                {:input {:id "nobody"}
+                                 :dispatches dispatches})]
+      (is (true? (:pass? result)))
+      (is (= :not-found (:matched-dispatch result))))))
+
+(deftest test-cell-with-expected-dispatch-test
+  (testing "test-cell with :expected-dispatch checks dispatch matches"
+    (defmethod cell/cell-spec :dev/exp-dispatch [_]
+      {:id          :dev/exp-dispatch
+       :handler     (fn [_ data]
+                      (assoc data :profile {:name "Alice"}))
+       :schema      {:input [:map [:id :string]]
+                     :output {:found     [:map [:profile [:map [:name :string]]]]
+                              :not-found [:map [:error-message :string]]}}})
+    (let [dispatches {:found     (fn [d] (:profile d))
+                      :not-found (fn [d] (:error-message d))}]
+      ;; Correct expectation
+      (let [result (dev/test-cell :dev/exp-dispatch
+                                  {:input {:id "alice"}
+                                   :dispatches dispatches
+                                   :expected-dispatch :found})]
+        (is (true? (:pass? result))))
+      ;; Wrong expectation
+      (let [result (dev/test-cell :dev/exp-dispatch
+                                  {:input {:id "alice"}
+                                   :dispatches dispatches
+                                   :expected-dispatch :not-found})]
+        (is (false? (:pass? result)))
+        (is (some #(= :dispatch (:phase %)) (:errors result)))))))
 
 (deftest test-cell-per-transition-schema-test
-  (testing "test-cell validates against per-transition schema"
+  (testing "test-cell validates against per-transition schema via dispatches"
     (defmethod cell/cell-spec :dev/pt-cell [_]
       {:id          :dev/pt-cell
        :handler     (fn [_ data]
-                      (assoc data :profile {:name "Alice"} :mycelium/transition :found))
+                      (assoc data :profile {:name "Alice"}))
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
-                              :not-found [:map [:error-message :string]]}}
-       :transitions #{:found :not-found}})
-    (let [result (dev/test-cell :dev/pt-cell
-                                {:input {:id "alice"}})]
+                              :not-found [:map [:error-message :string]]}}})
+    (let [dispatches {:found     (fn [d] (:profile d))
+                      :not-found (fn [d] (:error-message d))}
+          result (dev/test-cell :dev/pt-cell
+                                {:input {:id "alice"}
+                                 :dispatches dispatches})]
       (is (true? (:pass? result))))))
 
-;; ===== test-transitions =====
+;; ===== test-transitions with dispatches =====
 
-(deftest test-transitions-test
-  (testing "test-transitions tests multiple transitions in one call"
+(deftest test-transitions-with-dispatches-test
+  (testing "test-transitions tests multiple dispatch paths"
     (defmethod cell/cell-spec :dev/multi-cell [_]
       {:id          :dev/multi-cell
        :handler     (fn [_ data]
                       (if (= (:id data) "alice")
-                        (assoc data :profile {:name "Alice"} :mycelium/transition :found)
-                        (assoc data :error-message "Not found" :mycelium/transition :not-found)))
+                        (assoc data :profile {:name "Alice"})
+                        (assoc data :error-message "Not found")))
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
-                              :not-found [:map [:error-message :string]]}}
-       :transitions #{:found :not-found}})
-    (let [results (dev/test-transitions :dev/multi-cell
-                    {:found     {:input {:id "alice"}}
-                     :not-found {:input {:id "nobody"}}})]
+                              :not-found [:map [:error-message :string]]}}})
+    (let [dispatches {:found     (fn [d] (:profile d))
+                      :not-found (fn [d] (:error-message d))}
+          results (dev/test-transitions :dev/multi-cell
+                    {:found     {:input {:id "alice"}
+                                 :dispatches dispatches}
+                     :not-found {:input {:id "nobody"}
+                                 :dispatches dispatches}})]
       (is (true? (get-in results [:found :pass?])))
       (is (true? (get-in results [:not-found :pass?])))
-      (is (= :found (get-in results [:found :output :mycelium/transition])))
-      (is (= :not-found (get-in results [:not-found :output :mycelium/transition]))))))
+      (is (= :found (get-in results [:found :matched-dispatch])))
+      (is (= :not-found (get-in results [:not-found :matched-dispatch]))))))
 
 ;; ===== enumerate-paths =====
 
 (deftest enumerate-paths-test
   (testing "enumerate-paths lists all paths through a workflow"
-    (let [manifest {:cells {:start  {:id :test/a :transitions #{:ok :fail}}
-                            :step-b {:id :test/b :transitions #{:done}}
-                            :step-c {:id :test/c :transitions #{:done}}}
+    (let [manifest {:cells {:start  {:id :test/a}
+                            :step-b {:id :test/b}
+                            :step-c {:id :test/c}}
                     :edges {:start  {:ok :step-b, :fail :step-c}
                             :step-b {:done :end}
                             :step-c {:done :end}}}
@@ -156,7 +191,7 @@
 
 (deftest enumerate-paths-cycle-terminates-test
   (testing "enumerate-paths terminates on cyclic workflows (loop edges)"
-    (let [manifest {:cells {:start {:id :test/a :transitions #{:again :done}}}
+    (let [manifest {:cells {:start {:id :test/a}}
                     :edges {:start {:again :start, :done :end}}}
           paths (dev/enumerate-paths manifest)]
       ;; Should produce exactly 1 path: start→end via :done

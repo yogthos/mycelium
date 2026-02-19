@@ -80,7 +80,7 @@ A **workflow** is a directed graph of cells, defined as data:
           :output [:map [:http-response map?]]}}
 ```
 
-The workflow DSL compiles down to a Maestro FSM spec. The `:edges` map compiles into `:dispatches` vectors where each keyword branch (`:success`, `:failure`, etc.) becomes a predicate checking `(:mycelium/transition data)` — the transition signal returned by the cell handler.
+The workflow DSL compiles down to a Maestro FSM spec. The `:dispatches` map in the workflow definition provides predicate functions for each edge label. Maestro evaluates these predicates against the handler's output data to determine routing — handlers compute data, the graph decides where it goes.
 
 ### Compilation: Workflow → Maestro FSM
 
@@ -89,7 +89,7 @@ The compilation step transforms the workflow definition into a Maestro-compatibl
 1. Map `:start` to `::fsm/start`, `:end` to `::fsm/end`, `:error` to `::fsm/error`
 2. For each cell in `:cells`, generate a Maestro state entry:
    - `:handler` wraps the cell's handler to inject schema validation
-   - `:dispatches` generated from `:edges` — each branch keyword becomes a predicate that checks `(= (:mycelium/transition data) :branch-keyword)`
+   - `:dispatches` taken from the workflow's `:dispatches` map — each predicate evaluates the handler's output data to determine routing
 3. Install `:pre` interceptor for input schema validation
 4. Install `:post` interceptor for output schema validation
 5. Wire up the cell registry so handlers are resolved by ID
@@ -312,7 +312,7 @@ Build a registry (an atom holding a map of cell-id → cell-spec) and the `defce
 Build Maestro-compatible `:pre` and `:post` interceptor functions:
 
 - **`:pre` interceptor:** Look up the current state's cell definition. Validate that all keys declared in the cell's `:input` schema exist in `(:data fsm-state)` and satisfy their type constraints. The full data map passes through — no keys are stripped. On failure, redirect to `::fsm/error` with a descriptive error attached.
-- **`:post` interceptor:** After the handler runs, validate that all keys declared in the cell's `:output` schema exist in the returned data and satisfy their type constraints. Also validate that `:mycelium/transition` is set and is one of the cell's declared transitions. On failure, redirect to `::fsm/error`.
+- **`:post` interceptor:** After the handler runs, validate that all keys declared in the cell's `:output` schema exist in the returned data and satisfy their type constraints. For per-transition output schemas, the post-interceptor uses the dispatch target (already determined by Maestro) to select the correct schema. On failure, redirect to `::fsm/error`.
 - **For async cells:** The post-interceptor logic wraps the callback rather than running in the `:post` hook. The framework replaces the cell's callback with a validating wrapper that checks the output schema before forwarding to Maestro's internal callback.
 
 Schema errors produce rich diagnostics: which cell failed, which schema (input or output), the actual data, and the Malli humanized error. This gives agents immediate, actionable feedback when their implementation doesn't match the contract.
@@ -346,18 +346,19 @@ The compiler takes a workflow map and produces a Maestro spec:
 **Output (Maestro spec):**
 ```clojure
 {:fsm {::fsm/start {:handler  <wrapped-auth/parse-request>
-                     :dispatches [[::validate (fn [d] (= (:mycelium/transition d) :success))]
-                                  [::fsm/error (fn [d] (= (:mycelium/transition d) :failure))]]}
+                     :dispatches [[::validate (fn [d] (:user-id d))]
+                                  [::fsm/error (fn [d] (not (:user-id d)))]]}
        ::validate  {:handler  <wrapped-auth/validate-session>
-                    :dispatches [[::fsm/end   (fn [d] (= (:mycelium/transition d) :ok))]
-                                 [::fsm/error (fn [d] (= (:mycelium/transition d) :fail))]]}}
+                    :dispatches [[::fsm/end   (fn [d] (:session-valid d))]
+                                 [::fsm/error (fn [d] (not (:session-valid d)))]]}}
  :opts {:pre  <schema-pre-interceptor>
         :post <schema-post-interceptor>}}
 ```
 
+> **Note:** Dispatch predicates are defined at the workflow level in the `:dispatches` key, not generated from cell transition signals. Handlers compute data; the graph routes.
+
 Key design decisions:
-- Cells signal their transition by assoc'ing `:mycelium/transition` into the returned data map (e.g., `(assoc data :mycelium/transition :success)`)
-- The compiler generates predicates from the edge keywords automatically
+- Handlers return enriched data — routing is determined by `:dispatches` predicates at the workflow level
 - Internal state IDs are namespaced to avoid collisions during composition
 - `:end` maps to `::fsm/end`, `:error` maps to `::fsm/error`, `:start` maps to `::fsm/start`
 
@@ -964,7 +965,7 @@ Malli schemas serve double duty — they're both runtime validation and agent gu
 
 2. **Output schemas catch drift.** If an agent returns `{:userid "123"}` instead of `{:user-id "123"}`, the post-interceptor catches it immediately with a clear error: "Output validation failed for :auth/parse-request — missing key :user-id". The agent gets immediate, actionable feedback.
 
-3. **Transition validation prevents orphan states.** If a cell's contract says transitions are `#{:success :failure}` and the agent returns `:mycelium/transition :ok`, the framework rejects it. The agent must use exactly the declared transitions.
+3. **Dispatch coverage validation.** Every edge label must have a corresponding dispatch predicate, and every dispatch predicate must match an edge. This is checked at compile time.
 
 This means an agent can't produce code that "works on my machine" but breaks in integration. The schemas enforce the contract at the boundary, every time.
 
@@ -1054,7 +1055,7 @@ This gives Claude Code explicit rules about scope, preventing the "read everythi
 
 2. **Schemas are not optional.** Every cell must declare input and output schemas. Validation runs automatically on every transition. This is the "trap" that prevents agents from producing incorrect code that happens to compile.
 
-3. **Transitions are explicit.** A cell signals its transition by setting `:mycelium/transition` in the returned data. There is no implicit routing based on exception types or return value shapes.
+3. **Routing is decoupled from handlers.** Handlers compute and return data. Dispatch predicates at the workflow level examine the data to determine which edge to take. There is no implicit routing based on exception types or return value shapes.
 
 4. **Resources are injected, never acquired.** Cells declare dependencies; the system provides them. This makes testing trivial and prevents cells from reaching outside their boundaries.
 

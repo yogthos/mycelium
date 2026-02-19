@@ -21,27 +21,14 @@
 
 (defn- validate-output-schema!
   "Validates an output schema which may be a single schema (vector) or per-transition map."
-  [output-schema transitions cell-name]
+  [output-schema cell-name]
   (cond
     (vector? output-schema)
     (validate-malli-schema! output-schema (str cell-name " :output"))
 
     (map? output-schema)
-    (do
-      (doseq [[k v] output-schema]
-        (validate-malli-schema! v (str cell-name " :output transition " k)))
-      (let [schema-keys (set (keys output-schema))
-            trans-set   (set transitions)
-            extra       (cset/difference schema-keys trans-set)
-            missing     (cset/difference trans-set schema-keys)]
-        (when (seq extra)
-          (throw (ex-info (str "Output schema has keys " extra
-                               " not in transitions " trans-set " for " cell-name)
-                          {:cell-name cell-name :extra extra :transitions trans-set})))
-        (when (seq missing)
-          (throw (ex-info (str "Output schema missing keys " missing
-                               " for transitions " trans-set " in " cell-name)
-                          {:cell-name cell-name :missing missing :transitions trans-set})))))
+    (doseq [[k v] output-schema]
+      (validate-malli-schema! v (str cell-name " :output transition " k)))
 
     :else
     (validate-malli-schema! output-schema (str cell-name " :output"))))
@@ -57,16 +44,39 @@
     (throw (ex-info (str "Cell " cell-name " missing :schema :input") {:cell-name cell-name})))
   (when-not (get-in cell-def [:schema :output])
     (throw (ex-info (str "Cell " cell-name " missing :schema :output") {:cell-name cell-name})))
-  (when (or (nil? (:transitions cell-def)) (empty? (:transitions cell-def)))
-    (throw (ex-info (str "Cell " cell-name " missing or empty :transitions") {:cell-name cell-name})))
   (validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
-  (validate-output-schema! (get-in cell-def [:schema :output]) (:transitions cell-def) cell-name))
+  (validate-output-schema! (get-in cell-def [:schema :output]) cell-name))
+
+;; ===== Dispatch validation =====
+
+(defn- validate-dispatch-coverage!
+  "For each cell with map edges, checks dispatch keys match edge keys exactly.
+   Unconditional edges (keyword) need no dispatch."
+  [edges dispatches]
+  (doseq [[cell-name edge-def] edges]
+    (when (map? edge-def)
+      (let [edge-keys     (set (keys edge-def))
+            dispatch-map  (get dispatches cell-name)
+            dispatch-keys (when dispatch-map (set (keys dispatch-map)))]
+        (when-not dispatch-map
+          (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
+                          {:cell-name cell-name :edge-keys edge-keys})))
+        (let [missing (cset/difference edge-keys dispatch-keys)]
+          (when (seq missing)
+            (throw (ex-info (str "Cell " cell-name " has edge(s) " missing
+                                  " with no dispatch predicates")
+                            {:cell-name cell-name :missing missing}))))
+        (let [extra (cset/difference dispatch-keys edge-keys)]
+          (when (seq extra)
+            (throw (ex-info (str "Cell " cell-name " has dispatch(es) " extra
+                                  " that don't match any edge")
+                            {:cell-name cell-name :extra extra}))))))))
 
 ;; ===== Manifest validation =====
 
 (defn validate-manifest
   "Validates a manifest structure. Returns the manifest if valid, throws otherwise."
-  [{:keys [id cells edges] :as manifest}]
+  [{:keys [id cells edges dispatches] :as manifest}]
   (when-not id
     (throw (ex-info "Manifest missing :id" {:manifest manifest})))
   (when-not cells
@@ -88,22 +98,8 @@
     (when-not (get edges cell-name)
       (throw (ex-info (str "Cell " cell-name " has no edges defined")
                       {:cell-name cell-name}))))
-  ;; Validate edge keys match declared transitions
-  (doseq [[cell-name cell-def] cells]
-    (let [edge-def    (get edges cell-name)
-          declared    (:transitions cell-def)
-          edge-keys   (when (map? edge-def) (set (keys edge-def)))]
-      (when edge-keys
-        (let [uncovered (cset/difference declared edge-keys)]
-          (when (seq uncovered)
-            (throw (ex-info (str "Cell " cell-name " declares transition(s) "
-                                 uncovered " not covered by edges")
-                            {:cell-name cell-name :uncovered uncovered}))))
-        (let [dead (cset/difference edge-keys declared)]
-          (when (seq dead)
-            (throw (ex-info (str "Cell " cell-name " has edge(s) " dead
-                                 " that don't match any declared transition " declared)
-                            {:cell-name cell-name :dead dead})))))))
+  ;; Validate dispatch coverage for map edges
+  (validate-dispatch-coverage! edges (or dispatches {}))
   ;; Validate reachability (BFS from :start)
   (let [cell-names (set (keys cells))
         adjacency  (into {}
@@ -149,46 +145,54 @@
 
 (defn- format-output-schema-section
   "Formats output schema section for the cell-brief prompt.
-   Handles both single-schema (vector) and per-transition (map) formats."
-  [output-schema transitions]
+   Handles both single-schema (vector) and per-edge (map) formats."
+  [output-schema edge-labels]
   (if (map? output-schema)
-    (str "Output schemas (per transition):\n"
+    (str "Output schemas (per edge):\n"
          (str/join "\n"
-                   (map (fn [t]
-                          (str "  " (pr-str t) ": " (pr-str (get output-schema t))))
-                        (sort transitions))))
+                   (map (fn [label]
+                          (str "  " (pr-str label) ": " (pr-str (get output-schema label))))
+                        (sort edge-labels))))
     (str "Output schema:\n  " (pr-str output-schema))))
 
 (defn- generate-output-examples
-  "Generates output examples. For per-transition maps, generates one per transition."
-  [output-schema transitions]
+  "Generates output examples. For per-edge schema maps, generates one per edge."
+  [output-schema edge-labels]
   (if (map? output-schema)
     (into {}
-          (map (fn [t]
-                 [t (merge (generate-example (get output-schema t))
-                           {:mycelium/transition t})]))
-          (sort transitions))
-    (merge (generate-example output-schema)
-           {:mycelium/transition (first (sort transitions))})))
+          (map (fn [label]
+                 [label (generate-example (get output-schema label))]))
+          (sort edge-labels))
+    (generate-example output-schema)))
 
 (defn cell-brief
   "Extracts a self-contained brief for a single cell from a manifest.
-   Returns a map with :id, :doc, :schema, :transitions, :requires, :examples, :prompt."
+   Returns a map with :id, :doc, :schema, :requires, :examples, :prompt."
   [manifest cell-name]
   (let [cell-def    (get-in manifest [:cells cell-name])
         _           (when-not cell-def
                       (throw (ex-info (str "Cell " cell-name " not found in manifest")
                                       {:cell-name cell-name :manifest-id (:id manifest)})))
-        {:keys [id doc schema transitions requires]} cell-def
+        {:keys [id doc schema requires]} cell-def
+        edge-def    (get-in manifest [:edges cell-name])
+        edge-labels (when (map? edge-def) (set (keys edge-def)))
+        dispatches  (get-in manifest [:dispatches cell-name])
         input-ex    (generate-example (:input schema))
-        output-ex   (generate-output-examples (:output schema) transitions)
-        output-section (format-output-schema-section (:output schema) transitions)
+        output-ex   (generate-output-examples (:output schema) edge-labels)
+        output-section (format-output-schema-section (:output schema) edge-labels)
         example-section (if (map? (:output schema))
                           (str/join "\n\n"
-                                    (map (fn [[t ex]]
-                                           (str "Example output (" (pr-str t) "):\n  " (pr-str ex)))
+                                    (map (fn [[label ex]]
+                                           (str "Example output (" (pr-str label) "):\n  " (pr-str ex)))
                                          (sort-by first output-ex)))
                           (str "Example output:\n  " (pr-str output-ex)))
+        dispatch-section (when dispatches
+                           (str "Dispatch predicates determine routing based on your return data:\n"
+                                (str/join "\n"
+                                          (map (fn [[label _]]
+                                                 (str "  " (pr-str label) " — predicate evaluates your output"))
+                                               (sort dispatches)))
+                                "\n"))
         prompt      (str "## Cell: " id "\n"
                          (when doc (str "\n## Purpose\n" doc "\n"))
                          "\n## Contract\n\n"
@@ -197,21 +201,19 @@
                          "Required resources: " (if (seq requires)
                                                   (str/join ", " (map pr-str requires))
                                                   "none") "\n\n"
-                         "Transition signals: " (str/join ", " (map pr-str transitions)) "\n"
-                         "  Return (assoc data :mycelium/transition :<signal>) for each.\n"
+                         (when dispatch-section
+                           (str dispatch-section "\n"))
                          "\n## Example Data\n\n"
                          "Example input:\n  " (pr-str input-ex) "\n\n"
                          example-section "\n"
                          "\n## Rules\n"
                          "- Handler signature: (fn [resources data] -> data)\n"
-                         "- MUST return data with :mycelium/transition set to one of: "
-                         (str/join ", " (map pr-str transitions)) "\n"
+                         "- Return enriched data — dispatch predicates in the workflow determine routing\n"
                          "- MUST NOT require or call any other cell's namespace\n"
                          "- Output data MUST pass the output schema validation\n")]
     {:id          id
      :doc         doc
      :schema      schema
-     :transitions transitions
      :requires    (or requires [])
      :examples    {:input input-ex :output output-ex}
      :prompt      prompt}))
@@ -223,29 +225,26 @@
    For each cell in the manifest:
    - If not already registered, registers a stub handler with the full manifest spec.
    - If already registered, applies manifest metadata via `set-cell-meta!`.
-   The manifest is the single source of truth for schemas, transitions, and requires.
-   Returns {:cells ... :edges ...} suitable for `workflow/compile-workflow`."
-  [{:keys [cells edges] :as manifest}]
+   The manifest is the single source of truth for schemas and requires.
+   Returns {:cells ... :edges ... :dispatches ...} suitable for `workflow/compile-workflow`."
+  [{:keys [cells edges dispatches] :as manifest}]
   (let [cell-ids (into {}
                        (map (fn [[cell-name cell-def]]
-                              (let [{:keys [id schema transitions requires]} cell-def]
+                              (let [{:keys [id schema requires]} cell-def]
                                 (if (cell/get-cell id)
                                   ;; Cell already registered — apply manifest metadata
-                                  (cell/set-cell-meta! id {:schema      schema
-                                                           :transitions transitions
-                                                           :requires    (or requires [])})
+                                  (cell/set-cell-meta! id {:schema   schema
+                                                           :requires (or requires [])})
                                   ;; Not registered — register stub handler with full spec
-                                  (let [stub {:id          id
-                                              :handler     (fn [_ data]
-                                                             (assoc data :mycelium/transition
-                                                                    (first (sort transitions))))
-                                              :schema      schema
-                                              :transitions transitions
-                                              :requires    (or requires [])
-                                              :doc         (:doc cell-def)}]
+                                  (let [stub {:id      id
+                                              :handler (fn [_ data] data)
+                                              :schema  schema
+                                              :requires (or requires [])
+                                              :doc     (:doc cell-def)}]
                                     (.addMethod cell/cell-spec id (constantly stub))
                                     stub))
                                 [cell-name id])))
                        cells)]
-    {:cells cell-ids
-     :edges edges}))
+    (cond-> {:cells cell-ids
+             :edges edges}
+      dispatches (assoc :dispatches dispatches))))

@@ -8,8 +8,10 @@
    :schema   {:input  [:map]
               :output [:map
                         [:html :string]]}
-   :requires []
-   :transitions #{:done}}}
+   :requires []}}
 
  :edges
- {:start {:done :end}}}
+ {:start {:done :end}}
+
+ :dispatches
+ {:start {:done (fn [_] true)}}}

@@ -11,10 +11,11 @@
    Options:
      :input               - input data map
      :resources           - resources map (default {})
-     :expected-transition  - if set, verifies the handler returned this transition
+     :dispatches          - {label → pred-fn} for dispatch-aware output validation
+     :expected-dispatch   - if set, verifies the matched dispatch label
    Returns:
-     {:pass? bool :errors [...] :output {...} :duration-ms n}"
-  [cell-id {:keys [input resources expected-transition] :or {resources {}}}]
+     {:pass? bool :errors [...] :output {...} :duration-ms n :matched-dispatch kw-or-nil}"
+  [cell-id {:keys [input resources dispatches expected-dispatch] :or {resources {}}}]
   (let [cell       (cell/get-cell! cell-id)
         start-time (System/nanoTime)
         ;; Validate input
@@ -27,25 +28,31 @@
       (try
         (let [output      ((:handler cell) resources input)
               duration-ms (/ (- (System/nanoTime) start-time) 1e6)
-              output-err  (schema/validate-output cell output)
-              actual-trans (:mycelium/transition output)
-              trans-err   (when (and expected-transition
-                                     (not= expected-transition actual-trans))
-                            {:phase :transition
-                             :detail (str "Expected transition " expected-transition
-                                          " but got " actual-trans)})
+              ;; Determine matched dispatch label first
+              matched     (when dispatches
+                            (some (fn [[label pred]]
+                                    (when (pred output) label))
+                                  dispatches))
+              output-err  (schema/validate-output cell output matched)
+              dispatch-err (when (and expected-dispatch
+                                      (not= expected-dispatch matched))
+                             {:phase :dispatch
+                              :detail (str "Expected dispatch " expected-dispatch
+                                           " but got " matched)})
               all-errors  (cond-> []
-                            output-err (conj {:phase :output :detail output-err})
-                            trans-err  (conj trans-err))]
+                            output-err   (conj {:phase :output :detail output-err})
+                            dispatch-err (conj dispatch-err))]
           (if (seq all-errors)
-            {:pass?       false
-             :errors      all-errors
-             :output      output
-             :duration-ms duration-ms}
-            {:pass?       true
-             :errors      []
-             :output      output
-             :duration-ms duration-ms}))
+            {:pass?            false
+             :errors           all-errors
+             :output           output
+             :duration-ms      duration-ms
+             :matched-dispatch matched}
+            {:pass?            true
+             :errors           []
+             :output           output
+             :duration-ms      duration-ms
+             :matched-dispatch matched}))
         (catch Exception e
           {:pass?       false
            :errors      [{:phase :handler :detail (ex-message e)}]
@@ -53,13 +60,13 @@
            :duration-ms (/ (- (System/nanoTime) start-time) 1e6)})))))
 
 (defn test-transitions
-  "Tests a cell across multiple transitions.
-   cases: {transition-kw {:input ... :resources ...}}
-   Returns: {transition-kw test-result}"
+  "Tests a cell across multiple dispatch paths.
+   cases: {dispatch-label {:input ... :resources ... :dispatches ...}}
+   Returns: {dispatch-label test-result}"
   [cell-id cases]
   (into {}
-        (map (fn [[transition opts]]
-               [transition (test-cell cell-id (assoc opts :expected-transition transition))]))
+        (map (fn [[label opts]]
+               [label (test-cell cell-id (assoc opts :expected-dispatch label))]))
         cases))
 
 (defn enumerate-paths

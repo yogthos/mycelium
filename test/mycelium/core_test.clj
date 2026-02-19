@@ -12,14 +12,14 @@
     (defmethod cell/cell-spec :core/adder [_]
       {:id          :core/adder
        :handler     (fn [_ data]
-                      (assoc data :result (+ (:x data) 100) :mycelium/transition :done))
+                      (assoc data :result (+ (:x data) 100)))
        :schema      {:input [:map [:x :int]]
-                     :output [:map [:result :int]]}
-       :transitions #{:done}})
+                     :output [:map [:result :int]]}})
 
     (let [result (mycelium/run-workflow
                   {:cells {:start :core/adder}
-                   :edges {:start {:done :end}}}
+                   :edges {:start {:done :end}}
+                   :dispatches {:start {:done (constantly true)}}}
                   {}
                   {:x 42})]
       (is (= 142 (:result result))))))
