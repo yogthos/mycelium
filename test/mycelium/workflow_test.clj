@@ -49,8 +49,8 @@
 (deftest compile-edges-with-dispatch-map-test
   (testing "compile-edges with dispatch map → predicates route based on data, not :mycelium/transition"
     (let [edges {:success :validate, :failure :error}
-          dispatch-map {:success (fn [data] (:a-done data))
-                        :failure (fn [data] (not (:a-done data)))}
+          dispatch-map [[:success (fn [data] (:a-done data))]
+                        [:failure (fn [data] (not (:a-done data)))]]
           dispatches (wf/compile-edges edges dispatch-map)]
       (is (= 2 (count dispatches)))
       ;; Each dispatch is [target-id pred-fn]
@@ -71,9 +71,10 @@
 
 (deftest compile-edges-missing-dispatch-throws-test
   (testing "compile-edges throws when dispatch map missing a label"
-    (is (thrown-with-msg? Exception #"No dispatch for edge label"
+    (is (thrown-with-msg? Exception #"No edge target for dispatch label"
           (wf/compile-edges {:success :end, :failure :error}
-                            {:success (fn [data] (:ok data))})))))
+                            [[:success (fn [data] (:ok data))]
+                             [:oops (fn [_] true)]])))))
 
 ;; ===== Linear workflow compilation =====
 
@@ -86,10 +87,10 @@
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
                             :step-c {:done :end}}
-                    :dispatches {:start  {:success (fn [data] (:a-done data))
-                                          :failure (fn [data] (not (:a-done data)))}
-                                 :step-b {:success (constantly true)}
-                                 :step-c {:done (constantly true)}}}
+                    :dispatches {:start  [[:success (fn [data] (:a-done data))]
+                                          [:failure (fn [data] (not (:a-done data)))]]
+                                 :step-b [[:success (constantly true)]]
+                                 :step-c [[:done (constantly true)]]}}
           compiled (wf/compile-workflow workflow)]
       (is (some? compiled))
       (is (map? compiled)))))
@@ -116,9 +117,9 @@
                     :orphan   :test/cell-c}
             :edges {:start  {:success :step-b, :failure :error}
                     :step-b {:success :end}}
-            :dispatches {:start  {:success (fn [d] (:a-done d))
-                                  :failure (fn [d] (not (:a-done d)))}
-                         :step-b {:success (constantly true)}}})))))
+            :dispatches {:start  [[:success (fn [d] (:a-done d))]
+                                  [:failure (fn [d] (not (:a-done d)))]]
+                         :step-b [[:success (constantly true)]]}})))))
 
 ;; ===== Validation: missing dispatch for edge =====
 
@@ -130,7 +131,7 @@
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
             :edges {:start {:success :end, :failure :error}}
-            :dispatches {:start {:success (fn [d] (:a-done d))}}})))))
+            :dispatches {:start [[:success (fn [d] (:a-done d))]]}})))))
 
 (deftest validate-catches-extra-dispatch-test
   (testing "Validate catches extra dispatch key not in edges"
@@ -139,8 +140,8 @@
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
             :edges {:start {:success :end}}
-            :dispatches {:start {:success (fn [d] (:a-done d))
-                                 :extra   (fn [d] (:x d))}}})))))
+            :dispatches {:start [[:success (fn [d] (:a-done d))]
+                                 [:extra   (fn [d] (:x d))]]}})))))
 
 (deftest validate-no-dispatches-for-map-edges-test
   (testing "Validate catches map edges with no :dispatches key at all"
@@ -161,10 +162,10 @@
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
                             :step-c {:done :end}}
-                    :dispatches {:start  {:success (fn [d] (:a-done d))
-                                          :failure (fn [d] (not (:a-done d)))}
-                                 :step-b {:success (constantly true)}
-                                 :step-c {:done (constantly true)}}}]
+                    :dispatches {:start  [[:success (fn [d] (:a-done d))]
+                                          [:failure (fn [d] (not (:a-done d)))]]
+                                 :step-b [[:success (constantly true)]]
+                                 :step-c [[:done (constantly true)]]}}]
       ;; Should not throw
       (is (some? (wf/compile-workflow workflow))))))
 
@@ -186,8 +187,8 @@
                     :step-2 :test/needs-z}
             :edges {:start  {:next :step-2}
                     :step-2 {:ok :end}}
-            :dispatches {:start  {:next (constantly true)}
-                         :step-2 {:ok (constantly true)}}})))))
+            :dispatches {:start  [[:next (constantly true)]]
+                         :step-2 [[:ok (constantly true)]]}})))))
 
 ;; ===== Branching workflow =====
 
@@ -200,10 +201,10 @@
                     :edges {:start  {:success :path-b, :failure :path-d}
                             :path-b {:success :end}
                             :path-d {:done :end}}
-                    :dispatches {:start  {:success (fn [d] (:a-done d))
-                                          :failure (fn [d] (not (:a-done d)))}
-                                 :path-b {:success (constantly true)}
-                                 :path-d {:done (constantly true)}}}
+                    :dispatches {:start  [[:success (fn [d] (:a-done d))]
+                                          [:failure (fn [d] (not (:a-done d)))]]
+                                 :path-b [[:success (constantly true)]]
+                                 :path-d [[:done (constantly true)]]}}
           compiled (wf/compile-workflow workflow)]
       (is (some? compiled)))))
 
@@ -216,8 +217,8 @@
           (wf/compile-workflow
            {:cells {:start :test/cell-a}
             :edges {:start {:success :nonexistent-cell, :failure :error}}
-            :dispatches {:start {:success (fn [d] (:a-done d))
-                                 :failure (fn [d] (not (:a-done d)))}}})))))
+            :dispatches {:start [[:success (fn [d] (:a-done d))]
+                                 [:failure (fn [d] (not (:a-done d)))]]}})))))
 
 ;; ===== Per-transition schema chain validation =====
 
@@ -252,10 +253,10 @@
                                              :not-found :render-error}
                             :render-profile {:done :end}
                             :render-error   {:done :end}}
-                    :dispatches {:start          {:found     (fn [d] (:profile d))
-                                                  :not-found (fn [d] (:error-message d))}
-                                 :render-profile {:done (constantly true)}
-                                 :render-error   {:done (constantly true)}}}]
+                    :dispatches {:start          [[:found     (fn [d] (:profile d))]
+                                                  [:not-found (fn [d] (:error-message d))]]
+                                 :render-profile [[:done (constantly true)]]
+                                 :render-error   [[:done (constantly true)]]}}]
       (is (some? (wf/compile-workflow workflow))))))
 
 (deftest per-transition-schema-chain-catches-missing-key-test
@@ -269,9 +270,9 @@
             :edges {:start          {:found :render-profile
                                      :not-found :render-profile}
                     :render-profile {:done :end}}
-            :dispatches {:start          {:found     (fn [d] (:profile d))
-                                          :not-found (fn [d] (:error-message d))}
-                         :render-profile {:done (constantly true)}}})))))
+            :dispatches {:start          [[:found     (fn [d] (:profile d))]
+                                          [:not-found (fn [d] (:error-message d))]]
+                         :render-profile [[:done (constantly true)]]}})))))
 
 (deftest per-transition-schema-chain-two-paths-independent-test
   (testing "Two paths have different keys, each validates independently"
@@ -284,10 +285,10 @@
                                           :not-found :render-error}
                          :render-profile {:done :end}
                          :render-error   {:done :end}}
-                 :dispatches {:start          {:found     (fn [d] (:profile d))
-                                               :not-found (fn [d] (:error-message d))}
-                              :render-profile {:done (constantly true)}
-                              :render-error   {:done (constantly true)}}})))))
+                 :dispatches {:start          [[:found     (fn [d] (:profile d))]
+                                               [:not-found (fn [d] (:error-message d))]]
+                              :render-profile [[:done (constantly true)]]
+                              :render-error   [[:done (constantly true)]]}})))))
 
 (deftest single-vector-schema-chain-still-works-test
   (testing "Single vector output schema still works in chain validation"
@@ -298,10 +299,10 @@
                     :edges {:start  {:success :step-b, :failure :error}
                             :step-b {:success :step-c}
                             :step-c {:done :end}}
-                    :dispatches {:start  {:success (fn [d] (:a-done d))
-                                          :failure (fn [d] (not (:a-done d)))}
-                                 :step-b {:success (constantly true)}
-                                 :step-c {:done (constantly true)}}}]
+                    :dispatches {:start  [[:success (fn [d] (:a-done d))]
+                                          [:failure (fn [d] (not (:a-done d)))]]
+                                 :step-b [[:success (constantly true)]]
+                                 :step-c [[:done (constantly true)]]}}]
       (is (some? (wf/compile-workflow workflow))))))
 
 ;; ===== Map schema with Malli properties =====
@@ -323,8 +324,61 @@
                          :step-2 :test/props-consumer}
                  :edges {:start  {:done :step-2}
                          :step-2 {:done :end}}
-                 :dispatches {:start  {:done (constantly true)}
-                              :step-2 {:done (constantly true)}}})))))
+                 :dispatches {:start  [[:done (constantly true)]]
+                              :step-2 [[:done (constantly true)]]}})))))
+
+;; ===== Three or more dispatch predicates — ordering matters =====
+
+(deftest three-predicate-ordering-test
+  (testing "With 3+ dispatches, first matching predicate wins (vector ordering)"
+    (defmethod cell/cell-spec :test/classifier [_]
+      {:id :test/classifier
+       :handler (fn [_ data]
+                  (assoc data :score (:raw-score data)))
+       :schema {:input [:map [:raw-score :int]]
+                :output [:map [:score :int]]}})
+    (defmethod cell/cell-spec :test/high-handler [_]
+      {:id :test/high-handler
+       :handler (fn [_ data] (assoc data :tier "high"))
+       :schema {:input [:map [:score :int]]
+                :output [:map [:tier :string]]}})
+    (defmethod cell/cell-spec :test/medium-handler [_]
+      {:id :test/medium-handler
+       :handler (fn [_ data] (assoc data :tier "medium"))
+       :schema {:input [:map [:score :int]]
+                :output [:map [:tier :string]]}})
+    (defmethod cell/cell-spec :test/low-handler [_]
+      {:id :test/low-handler
+       :handler (fn [_ data] (assoc data :tier "low"))
+       :schema {:input [:map [:score :int]]
+                :output [:map [:tier :string]]}})
+    ;; Workflow with 3 dispatch predicates — order determines priority
+    ;; A score of 75 matches both :high (>= 70) and :medium (>= 40),
+    ;; but :high comes first in the vector so it wins.
+    (let [workflow {:cells {:start  :test/classifier
+                            :high   :test/high-handler
+                            :medium :test/medium-handler
+                            :low    :test/low-handler}
+                    :edges {:start  {:high :high, :medium :medium, :low :low}
+                            :high   {:done :end}
+                            :medium {:done :end}
+                            :low    {:done :end}}
+                    :dispatches {:start  [[:high   (fn [d] (>= (:score d) 70))]
+                                          [:medium (fn [d] (>= (:score d) 40))]
+                                          [:low    (constantly true)]]
+                                 :high   [[:done (constantly true)]]
+                                 :medium [[:done (constantly true)]]
+                                 :low    [[:done (constantly true)]]}}
+          compiled (wf/compile-workflow workflow)]
+      ;; Score 75: matches :high (>= 70) and :medium (>= 40), :high wins
+      (let [result (fsm/run compiled {} {:data {:raw-score 75}})]
+        (is (= "high" (:tier result))))
+      ;; Score 50: doesn't match :high, matches :medium (>= 40) and :low, :medium wins
+      (let [result (fsm/run compiled {} {:data {:raw-score 50}})]
+        (is (= "medium" (:tier result))))
+      ;; Score 10: only matches :low (constantly true)
+      (let [result (fsm/run compiled {} {:data {:raw-score 10}})]
+        (is (= "low" (:tier result)))))))
 
 ;; ===== Unconditional edges don't need dispatches =====
 

@@ -22,9 +22,9 @@
             :requires [:db]}}
    :edges {:start   {:next :process}
            :process {:done :end, :error :error}}
-   :dispatches {:start   {:next (constantly true)}
-                :process {:done  (fn [d] (:z d))
-                          :error (fn [d] (not (:z d)))}}})
+   :dispatches {:start   [[:next (constantly true)]]
+                :process [[:done  (fn [d] (:z d))]
+                          [:error (fn [d] (not (:z d)))]]}})
 
 ;; ===== 1. cell-briefs returns brief for every cell =====
 

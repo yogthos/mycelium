@@ -80,8 +80,8 @@
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
                               :not-found [:map [:error-message :string]]}}})
-    (let [dispatches {:found     (fn [d] (:profile d))
-                      :not-found (fn [d] (:error-message d))}
+    (let [dispatches [[:found     (fn [d] (:profile d))]
+                      [:not-found (fn [d] (:error-message d))]]
           result (dev/test-cell :dev/dispatch-cell
                                 {:input {:id "alice"}
                                  :dispatches dispatches})]
@@ -97,8 +97,8 @@
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
                               :not-found [:map [:error-message :string]]}}})
-    (let [dispatches {:found     (fn [d] (:profile d))
-                      :not-found (fn [d] (:error-message d))}
+    (let [dispatches [[:found     (fn [d] (:profile d))]
+                      [:not-found (fn [d] (:error-message d))]]
           result (dev/test-cell :dev/dispatch-cell2
                                 {:input {:id "nobody"}
                                  :dispatches dispatches})]
@@ -114,8 +114,8 @@
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
                               :not-found [:map [:error-message :string]]}}})
-    (let [dispatches {:found     (fn [d] (:profile d))
-                      :not-found (fn [d] (:error-message d))}]
+    (let [dispatches [[:found     (fn [d] (:profile d))]
+                      [:not-found (fn [d] (:error-message d))]]]
       ;; Correct expectation
       (let [result (dev/test-cell :dev/exp-dispatch
                                   {:input {:id "alice"}
@@ -139,8 +139,8 @@
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
                               :not-found [:map [:error-message :string]]}}})
-    (let [dispatches {:found     (fn [d] (:profile d))
-                      :not-found (fn [d] (:error-message d))}
+    (let [dispatches [[:found     (fn [d] (:profile d))]
+                      [:not-found (fn [d] (:error-message d))]]
           result (dev/test-cell :dev/pt-cell
                                 {:input {:id "alice"}
                                  :dispatches dispatches})]
@@ -159,8 +159,8 @@
        :schema      {:input [:map [:id :string]]
                      :output {:found     [:map [:profile [:map [:name :string]]]]
                               :not-found [:map [:error-message :string]]}}})
-    (let [dispatches {:found     (fn [d] (:profile d))
-                      :not-found (fn [d] (:error-message d))}
+    (let [dispatches [[:found     (fn [d] (:profile d))]
+                      [:not-found (fn [d] (:error-message d))]]
           results (dev/test-transitions :dev/multi-cell
                     {:found     {:input {:id "alice"}
                                  :dispatches dispatches}

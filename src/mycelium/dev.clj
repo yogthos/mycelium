@@ -11,7 +11,7 @@
    Options:
      :input               - input data map
      :resources           - resources map (default {})
-     :dispatches          - {label → pred-fn} for dispatch-aware output validation
+     :dispatches          - [[label pred-fn] ...] for dispatch-aware output validation
      :expected-dispatch   - if set, verifies the matched dispatch label
    Returns:
      {:pass? bool :errors [...] :output {...} :duration-ms n :matched-dispatch kw-or-nil}"

@@ -20,7 +20,7 @@
 
     (let [child-workflow {:cells {:start :comp/step1}
                           :edges {:start {:done :end}}
-                          :dispatches {:start {:done (constantly true)}}}
+                          :dispatches {:start [[:done (constantly true)]]}}
           cell-spec (compose/workflow->cell :comp/child child-workflow
                                            {:input [:map [:x :int]]
                                             :output [:map [:y :int]]})]
@@ -42,7 +42,7 @@
 
     (let [child-workflow {:cells {:start :comp/doubler}
                           :edges {:start {:done :end}}
-                          :dispatches {:start {:done (constantly true)}}}]
+                          :dispatches {:start [[:done (constantly true)]]}}]
       ;; Register the child workflow as a cell
       (compose/register-workflow-cell! :comp/child-wf child-workflow
                                        {:input [:map [:x :int]]
@@ -61,9 +61,9 @@
                              :child :comp/child-wf}
                      :edges {:start {:next :child}
                              :child {:success :end, :failure :error}}
-                     :dispatches {:start {:next (constantly true)}
-                                  :child {:success (fn [d] (not (:mycelium/error d)))
-                                          :failure (fn [d] (some? (:mycelium/error d)))}}})
+                     :dispatches {:start [[:next (constantly true)]]
+                                  :child [[:success (fn [d] (not (:mycelium/error d)))]
+                                          [:failure (fn [d] (some? (:mycelium/error d)))]]}})
             result (fsm/run parent {} {:data {:raw 21}})]
         (is (= 42 (:doubled result)))))))
 
@@ -80,7 +80,7 @@
 
     (let [child-workflow {:cells {:start :comp/failing-cell}
                           :edges {:start {:done :end}}
-                          :dispatches {:start {:done (constantly true)}}}]
+                          :dispatches {:start [[:done (constantly true)]]}}]
       (compose/register-workflow-cell! :comp/failing-wf child-workflow
                                        {:input [:map [:x :int]]
                                         :output [:map [:y :int]]})
@@ -97,9 +97,9 @@
                              :handle :comp/error-handler}
                      :edges {:start  {:success :end, :failure :handle}
                              :handle {:done :end}}
-                     :dispatches {:start  {:success (fn [d] (not (:mycelium/error d)))
-                                           :failure (fn [d] (some? (:mycelium/error d)))}
-                                  :handle {:done (constantly true)}}})
+                     :dispatches {:start  [[:success (fn [d] (not (:mycelium/error d)))]
+                                           [:failure (fn [d] (some? (:mycelium/error d)))]]
+                                  :handle [[:done (constantly true)]]}})
             result (fsm/run parent {} {:data {:x 1}})]
         (is (= true (:error-handled result)))))))
 
@@ -117,7 +117,7 @@
     ;; Grandchild workflow
     (let [grandchild-wf {:cells {:start :comp/adder}
                          :edges {:start {:done :end}}
-                         :dispatches {:start {:done (constantly true)}}}]
+                         :dispatches {:start [[:done (constantly true)]]}}]
       (compose/register-workflow-cell! :comp/grandchild grandchild-wf
                                        {:input [:map [:n :int]]
                                         :output [:map [:n :int]]})
@@ -125,8 +125,8 @@
       ;; Child workflow containing grandchild
       (let [child-wf {:cells {:start :comp/grandchild}
                       :edges {:start {:success :end, :failure :error}}
-                      :dispatches {:start {:success (fn [d] (not (:mycelium/error d)))
-                                           :failure (fn [d] (some? (:mycelium/error d)))}}}]
+                      :dispatches {:start [[:success (fn [d] (not (:mycelium/error d)))]
+                                           [:failure (fn [d] (some? (:mycelium/error d)))]]}}]
         (compose/register-workflow-cell! :comp/child-nested child-wf
                                          {:input [:map [:n :int]]
                                           :output [:map [:n :int]]})
@@ -135,8 +135,8 @@
         (let [parent (wf/compile-workflow
                       {:cells {:start :comp/child-nested}
                        :edges {:start {:success :end, :failure :error}}
-                       :dispatches {:start {:success (fn [d] (not (:mycelium/error d)))
-                                            :failure (fn [d] (some? (:mycelium/error d)))}}})
+                       :dispatches {:start [[:success (fn [d] (not (:mycelium/error d)))]
+                                            [:failure (fn [d] (some? (:mycelium/error d)))]]}})
               result (fsm/run parent {} {:data {:n 0}})]
           (is (= 10 (:n result))))))))
 
@@ -152,7 +152,7 @@
 
     (let [child-wf {:cells {:start :comp/traced}
                     :edges {:start {:done :end}}
-                    :dispatches {:start {:done (constantly true)}}}]
+                    :dispatches {:start [[:done (constantly true)]]}}]
       (compose/register-workflow-cell! :comp/traced-wf child-wf
                                        {:input [:map [:x :int]]
                                         :output [:map [:x :int]]})
@@ -160,8 +160,8 @@
       (let [parent (wf/compile-workflow
                     {:cells {:start :comp/traced-wf}
                      :edges {:start {:success :end, :failure :error}}
-                     :dispatches {:start {:success (fn [d] (not (:mycelium/error d)))
-                                          :failure (fn [d] (some? (:mycelium/error d)))}}})
+                     :dispatches {:start [[:success (fn [d] (not (:mycelium/error d)))]
+                                          [:failure (fn [d] (some? (:mycelium/error d)))]]}})
             result (fsm/run parent {} {:data {:x 1}})]
         (is (vector? (:mycelium/child-trace result)))))))
 
@@ -179,7 +179,7 @@
 
     (let [child-wf {:cells {:start :comp/resource-user}
                     :edges {:start {:done :end}}
-                    :dispatches {:start {:done (constantly true)}}}]
+                    :dispatches {:start [[:done (constantly true)]]}}]
       (compose/register-workflow-cell! :comp/resource-wf child-wf
                                        {:input [:map [:x :int]]
                                         :output [:map [:from-config :string]]})
@@ -187,8 +187,8 @@
       (let [parent    (wf/compile-workflow
                        {:cells {:start :comp/resource-wf}
                         :edges {:start {:success :end, :failure :error}}
-                        :dispatches {:start {:success (fn [d] (not (:mycelium/error d)))
-                                             :failure (fn [d] (some? (:mycelium/error d)))}}})
+                        :dispatches {:start [[:success (fn [d] (not (:mycelium/error d)))]
+                                             [:failure (fn [d] (some? (:mycelium/error d)))]]}})
             resources {:config {:value "from-parent"}}
             result    (fsm/run parent resources {:data {:x 1}})]
         (is (= "from-parent" (:from-config result)))))))
@@ -207,7 +207,7 @@
     (let [compile-count (atom 0)
           child-wf      {:cells {:start :comp/counter-cell}
                          :edges {:start {:done :end}}
-                         :dispatches {:start {:done (constantly true)}}}]
+                         :dispatches {:start [[:done (constantly true)]]}}]
       (with-redefs [wf/compile-workflow (let [orig wf/compile-workflow]
                                           (fn [& args]
                                             (swap! compile-count inc)
@@ -235,13 +235,16 @@
 
     (let [child-wf {:cells {:start :comp/simple}
                     :edges {:start {:done :end}}
-                    :dispatches {:start {:done (constantly true)}}}
+                    :dispatches {:start [[:done (constantly true)]]}}
           spec (compose/workflow->cell :comp/def-disp child-wf
                                       {:input [:map] :output [:map [:done :boolean]]})]
-      (is (map? (:default-dispatches spec)))
-      (is (contains? (:default-dispatches spec) :success))
-      (is (contains? (:default-dispatches spec) :failure))
+      (is (vector? (:default-dispatches spec)))
+      (let [labels (set (map first (:default-dispatches spec)))]
+        (is (contains? labels :success))
+        (is (contains? labels :failure)))
       ;; :success dispatch should return truthy for data without :mycelium/error
-      (is ((:success (:default-dispatches spec)) {:done true}))
-      ;; :failure dispatch should return truthy for data with :mycelium/error
-      (is ((:failure (:default-dispatches spec)) {:mycelium/error "boom"})))))
+      (let [success-pred (second (first (filter #(= :success (first %)) (:default-dispatches spec))))
+            failure-pred (second (first (filter #(= :failure (first %)) (:default-dispatches spec))))]
+        (is (success-pred {:done true}))
+        ;; :failure dispatch should return truthy for data with :mycelium/error
+        (is (failure-pred {:mycelium/error "boom"}))))))

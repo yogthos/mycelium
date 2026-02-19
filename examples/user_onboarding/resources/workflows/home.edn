@@ -70,11 +70,11 @@
   :render-login     {:done :end}}
 
  :dispatches
- {:start            {:success (fn [data] (:auth-token data))
-                     :failure (fn [data] (not (:auth-token data)))}
-  :validate-session {:authorized   (fn [data] (:session-valid data))
-                     :unauthorized (fn [data] (not (:session-valid data)))}
-  :fetch-profile    {:found     (fn [data] (:profile data))
-                     :not-found (fn [data] (:error-type data))}
-  :render-dashboard {:done (fn [_] true)}
-  :render-login     {:done (fn [_] true)}}}
+ {:start            [[:success (fn [data] (:auth-token data))]
+                     [:failure (fn [data] (not (:auth-token data)))]]
+  :validate-session [[:authorized   (fn [data] (:session-valid data))]
+                     [:unauthorized (fn [data] (not (:session-valid data)))]]
+  :fetch-profile    [[:found     (fn [data] (:profile data))]
+                     [:not-found (fn [data] (:error-type data))]]
+  :render-dashboard [[:done (fn [_] true)]]
+  :render-login     [[:done (fn [_] true)]]}}

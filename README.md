@@ -55,8 +55,8 @@ Cells must:
                         :add    :math/add-ten}
                 :edges {:start {:done :add}
                         :add   {:done :end}}
-                :dispatches {:start {:done (constantly true)}
-                             :add   {:done (constantly true)}}}
+                :dispatches {:start [[:done (constantly true)]]
+                             :add   [[:done (constantly true)]]}}
                {}          ;; resources
                {:x 5})]    ;; initial data
   (:result result))
@@ -82,10 +82,10 @@ Edges map transition labels to targets. Dispatch predicates examine the data to 
    :edges {:start {:high :big, :low :small}
            :big   {:done :end}
            :small {:done :end}}
-   :dispatches {:start {:high (fn [data] (:above-threshold data))
-                        :low  (fn [data] (not (:above-threshold data)))}
-                :big   {:done (constantly true)}
-                :small {:done (constantly true)}}}
+   :dispatches {:start [[:high (fn [data] (:above-threshold data))]
+                        [:low  (fn [data] (not (:above-threshold data)))]]
+                :big   [[:done (constantly true)]]
+                :small [[:done (constantly true)]]}}
   {} {:value 42})
 ```
 
@@ -195,10 +195,10 @@ Workflows can be nested as cells in parent workflows:
   {:cells {:start :auth/parse, :validate :auth/check}
    :edges {:start {:ok :validate, :fail :error}
            :validate {:ok :end, :fail :error}}
-   :dispatches {:start    {:ok   (fn [data] (:user-id data))
-                           :fail (fn [data] (:error data))}
-                :validate {:ok   (fn [data] (:session-valid data))
-                           :fail (fn [data] (not (:session-valid data)))}}}
+   :dispatches {:start    [[:ok   (fn [data] (:user-id data))]
+                            [:fail (fn [data] (:error data))]]
+                :validate [[:ok   (fn [data] (:session-valid data))]
+                           [:fail (fn [data] (not (:session-valid data)))]]}}
   {:input  [:map [:http-request map?]]
    :output [:map [:user-id :string]]})
 
@@ -208,7 +208,7 @@ Workflows can be nested as cells in parent workflows:
            :main  :app/dashboard}
    :edges {:start {:success :main, :failure :error}
            :main  {:done :end}}
-   :dispatches {:main {:done (constantly true)}}}
+   :dispatches {:main [[:done (constantly true)]]}}
   resources initial-data)
 ```
 
@@ -232,10 +232,10 @@ Define workflows as pure data in `.edn` files:
                     :requires [:db]}}
  :edges {:start    {:success :validate, :failure :error}
          :validate {:authorized :end, :unauthorized :error}}
- :dispatches {:start    {:success (fn [data] (:user-id data))
-                         :failure (fn [data] (not (:user-id data)))}
-              :validate {:authorized   (fn [data] (:session-valid data))
-                         :unauthorized (fn [data] (not (:session-valid data)))}}}
+ :dispatches {:start    [[:success (fn [data] (:user-id data))]
+                         [:failure (fn [data] (not (:user-id data)))]]
+              :validate [[:authorized   (fn [data] (:session-valid data))]
+                         [:unauthorized (fn [data] (not (:session-valid data)))]]}}
 ```
 
 Dispatch predicates in EDN are `(fn ...)` forms compiled by Maestro's built-in SCI evaluator.
@@ -279,8 +279,8 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 ;; With dispatch predicates to verify which edge matches
 (dev/test-cell :auth/parse-request
   {:input      {:http-request {:headers {} :body {"username" "alice"}}}
-   :dispatches {:success (fn [d] (:user-id d))
-                :failure (fn [d] (not (:user-id d)))}
+   :dispatches [[:success (fn [d] (:user-id d))]
+                [:failure (fn [d] (not (:user-id d)))]]
    :expected-dispatch :success})
 ;; => {:pass? true, :matched-dispatch :success, ...}
 ```
@@ -291,12 +291,12 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 (dev/test-transitions :user/fetch-profile
   {:found     {:input {:user-id "alice" :session-valid true}
                :resources {:db my-db}
-               :dispatches {:found     (fn [d] (:profile d))
-                            :not-found (fn [d] (:error-type d))}}
+               :dispatches [[:found     (fn [d] (:profile d))]
+                            [:not-found (fn [d] (:error-type d))]]}
    :not-found {:input {:user-id "nobody" :session-valid true}
                :resources {:db my-db}
-               :dispatches {:found     (fn [d] (:profile d))
-                            :not-found (fn [d] (:error-type d))}}})
+               :dispatches [[:found     (fn [d] (:profile d))]
+                            [:not-found (fn [d] (:error-type d))]]}})
 ;; => {:found     {:pass? true, :matched-dispatch :found, :output {...}}
 ;;     :not-found {:pass? true, :matched-dispatch :not-found, :output {...}}}
 ```
@@ -360,7 +360,7 @@ mycelium/
 │   ├── dev.clj            ;; Testing harness, visualization
 │   ├── orchestrate.clj    ;; Agent orchestration helpers
 │   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 104 tests, 210 assertions
+└── test/mycelium/         ;; 105 tests, 213 assertions
 ```
 
 ## License

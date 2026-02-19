@@ -50,15 +50,15 @@
 ;; ===== Dispatch validation =====
 
 (defn- validate-dispatch-coverage!
-  "For each cell with map edges, checks dispatch keys match edge keys exactly.
-   Unconditional edges (keyword) need no dispatch."
+  "For each cell with map edges, checks dispatch labels match edge keys exactly.
+   Dispatches are vectors of [label pred] pairs. Unconditional edges (keyword) need no dispatch."
   [edges dispatches]
   (doseq [[cell-name edge-def] edges]
     (when (map? edge-def)
       (let [edge-keys     (set (keys edge-def))
-            dispatch-map  (get dispatches cell-name)
-            dispatch-keys (when dispatch-map (set (keys dispatch-map)))]
-        (when-not dispatch-map
+            dispatch-vec  (get dispatches cell-name)
+            dispatch-keys (when dispatch-vec (set (map first dispatch-vec)))]
+        (when-not dispatch-vec
           (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
                           {:cell-name cell-name :edge-keys edge-keys})))
         (let [missing (cset/difference edge-keys dispatch-keys)]
@@ -187,11 +187,11 @@
                                          (sort-by first output-ex)))
                           (str "Example output:\n  " (pr-str output-ex)))
         dispatch-section (when dispatches
-                           (str "Dispatch predicates determine routing based on your return data:\n"
+                           (str "Dispatch predicates (checked in order, first match wins):\n"
                                 (str/join "\n"
                                           (map (fn [[label _]]
                                                  (str "  " (pr-str label) " — predicate evaluates your output"))
-                                               (sort dispatches)))
+                                               dispatches))
                                 "\n"))
         prompt      (str "## Cell: " id "\n"
                          (when doc (str "\n## Purpose\n" doc "\n"))

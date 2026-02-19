@@ -29,8 +29,8 @@
                              :step2 :int/step-2}
                      :edges {:start {:next :step2}
                              :step2 {:done :end}}
-                     :dispatches {:start {:next (constantly true)}
-                                  :step2 {:done (constantly true)}}})
+                     :dispatches {:start [[:next (constantly true)]]
+                                  :step2 [[:done (constantly true)]]}})
           result   (fsm/run compiled {} {:data {:x 10}})]
       (is (= 11 (:a result)))
       (is (= 22 (:b result))))))
@@ -66,10 +66,10 @@
                      :edges {:start {:high :high, :low :low}
                              :high  {:done :end}
                              :low   {:done :end}}
-                     :dispatches {:start {:high (fn [d] (> (:value d) 5))
-                                          :low  (fn [d] (<= (:value d) 5))}
-                                  :high {:done (constantly true)}
-                                  :low  {:done (constantly true)}}})]
+                     :dispatches {:start [[:high (fn [d] (> (:value d) 5))]
+                                          [:low  (fn [d] (<= (:value d) 5))]]
+                                  :high [[:done (constantly true)]]
+                                  :low  [[:done (constantly true)]]}})]
       (is (= "high" (:result (fsm/run compiled {} {:data {:value 10}}))))
       (is (= "low"  (:result (fsm/run compiled {} {:data {:value 2}})))))))
 
@@ -87,7 +87,7 @@
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/strict-cell}
                      :edges {:start {:ok :end}}
-                     :dispatches {:start {:ok (constantly true)}}})]
+                     :dispatches {:start [[:ok (constantly true)]]}})]
       (is (thrown? Exception
             (fsm/run compiled {} {:data {:name 42}}))))))
 
@@ -106,7 +106,7 @@
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/bad-output-cell}
                      :edges {:start {:ok :end}}
-                     :dispatches {:start {:ok (constantly true)}}})]
+                     :dispatches {:start [[:ok (constantly true)]]}})]
       (is (thrown? Exception
             (fsm/run compiled {} {:data {:x 1}}))))))
 
@@ -125,7 +125,7 @@
           compiled   (wf/compile-workflow
                       {:cells {:start :int/will-fail}
                        :edges {:start {:ok :end}}
-                       :dispatches {:start {:ok (constantly true)}}}
+                       :dispatches {:start [[:ok (constantly true)]]}}
                       {:on-error (fn [_ fsm-state]
                                    (reset! error-data (:data fsm-state))
                                    (:data fsm-state))})]
@@ -148,7 +148,7 @@
     (let [compiled  (wf/compile-workflow
                      {:cells {:start :int/uses-resource}
                       :edges {:start {:ok :end}}
-                      :dispatches {:start {:ok (constantly true)}}})
+                      :dispatches {:start [[:ok (constantly true)]]}})
           resources {:config {:api-key "secret-123"}}
           result    (fsm/run compiled resources {:data {:x 1}})]
       (is (= "secret-123" (:config-val result))))))
@@ -167,8 +167,8 @@
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/incrementer}
                      :edges {:start {:again :start, :done :end}}
-                     :dispatches {:start {:again (fn [d] (< (:count d) 5))
-                                          :done  (fn [d] (>= (:count d) 5))}}})
+                     :dispatches {:start [[:again (fn [d] (< (:count d) 5))]
+                                          [:done  (fn [d] (>= (:count d) 5))]]}})
           result   (fsm/run compiled {} {:data {:count 0}})]
       (is (= 5 (:count result))))))
 
@@ -189,6 +189,6 @@
     (let [compiled (wf/compile-workflow
                     {:cells {:start :int/async-cell}
                      :edges {:start {:ok :end}}
-                     :dispatches {:start {:ok (constantly true)}}})
+                     :dispatches {:start [[:ok (constantly true)]]}})
           result   (fsm/run compiled {} {:data {:x 7}})]
       (is (= 21 (:y result))))))

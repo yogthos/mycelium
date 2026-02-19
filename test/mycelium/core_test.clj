@@ -19,7 +19,7 @@
     (let [result (mycelium/run-workflow
                   {:cells {:start :core/adder}
                    :edges {:start {:done :end}}
-                   :dispatches {:start {:done (constantly true)}}}
+                   :dispatches {:start [[:done (constantly true)]]}}
                   {}
                   {:x 42})]
       (is (= 142 (:result result))))))

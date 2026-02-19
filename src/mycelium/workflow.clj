@@ -26,17 +26,18 @@
 (defn compile-edges
   "Compiles edge definitions into Maestro dispatch pairs.
    If edges is a keyword → unconditional dispatch to that target.
-   If edges is a map → each entry uses the predicate from dispatch-map."
-  [edges dispatch-map]
+   If edges is a map → uses dispatch-vec (vector of [label pred] pairs) to
+   produce ordered [[target pred] ...] matching Maestro's format."
+  [edges dispatch-vec]
   (if (keyword? edges)
     [[(resolve-state-id edges) (constantly true)]]
-    (mapv (fn [[label target]]
-            (let [pred (get dispatch-map label)]
-              (when-not pred
-                (throw (ex-info (str "No dispatch for edge label " label)
+    (mapv (fn [[label pred]]
+            (let [target (get edges label)]
+              (when-not target
+                (throw (ex-info (str "No edge target for dispatch label " label)
                                 {:label label})))
               [(resolve-state-id target) pred]))
-          edges)))
+          dispatch-vec)))
 
 ;; ===== Validation =====
 
@@ -102,15 +103,16 @@
           edges-map))
 
 (defn- validate-dispatch-coverage!
-  "For each cell with map edges, checks dispatch keys match edge keys exactly.
+  "For each cell with map edges, checks dispatch labels match edge keys exactly.
+   Dispatches are vectors of [label pred] pairs; labels must match edge keys.
    Cells with unconditional edges (keyword) need no dispatch entry."
   [edges-map dispatches-map]
   (doseq [[cell-name edge-def] edges-map]
     (when (map? edge-def)
       (let [edge-keys     (set (keys edge-def))
-            dispatch-map  (get dispatches-map cell-name)
-            dispatch-keys (when dispatch-map (set (keys dispatch-map)))]
-        (when-not dispatch-map
+            dispatch-vec  (get dispatches-map cell-name)
+            dispatch-keys (when dispatch-vec (set (map first dispatch-vec)))]
+        (when-not dispatch-vec
           (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
                           {:cell-name cell-name :edge-keys edge-keys})))
         (let [missing (set/difference edge-keys dispatch-keys)]
@@ -274,11 +276,11 @@
                                  (let [cell      (cell/get-cell! cell-id)
                                        state-id  (resolve-state-id cell-name)
                                        edge-def  (get edges cell-name)
-                                       dispatch-map (get effective-dispatches cell-name)]
+                                       dispatch-vec (get effective-dispatches cell-name)]
                                    [state-id
                                     (merge
                                      {:handler    (:handler cell)
-                                      :dispatches (compile-edges edge-def dispatch-map)}
+                                      :dispatches (compile-edges edge-def dispatch-vec)}
                                      (when (:async? cell)
                                        {:async? true}))])))
                           cells)

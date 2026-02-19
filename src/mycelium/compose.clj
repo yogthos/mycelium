@@ -6,9 +6,9 @@
 
 (def workflow-cell-dispatches
   "Default dispatch predicates for composed workflow cells.
-   Routes :success when no error, :failure when :mycelium/error is present."
-  {:success (fn [data] (not (:mycelium/error data)))
-   :failure (fn [data] (some? (:mycelium/error data)))})
+   Ordered vector — :success checked first, :failure as fallback."
+  [[:success (fn [data] (not (:mycelium/error data)))]
+   [:failure (fn [data] (some? (:mycelium/error data)))]])
 
 (defn workflow->cell
   "Wraps a workflow definition as a cell spec.
