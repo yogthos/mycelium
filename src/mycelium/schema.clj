@@ -94,13 +94,15 @@
           fsm-state)))))
 
 (defn make-post-interceptor
-  "Creates a Maestro post-interceptor that validates output schemas.
+  "Creates a Maestro post-interceptor that validates output schemas and appends
+   trace entries for diagnostics.
    Uses :last-state-id to look up the cell that just ran.
    `state->edge-targets` maps state-id → {target-state-id → transition-label},
    used to infer which transition was taken from :current-state-id (set by Maestro
    after dispatch evaluation).
+   `state->names` maps resolved-state-id → cell-name keyword for human-readable traces.
    Skips terminal states."
-  [state->cell state->edge-targets]
+  [state->cell state->edge-targets state->names]
   (fn [fsm-state _resources]
     (let [state-id (:last-state-id fsm-state)]
       (if (or (nil? state-id)
@@ -110,12 +112,19 @@
           (let [transition (when state->edge-targets
                              (get-in state->edge-targets
                                      [state-id (:current-state-id fsm-state)]))
-                error (validate-output cell (:data fsm-state) transition)]
+                data       (:data fsm-state)
+                error      (validate-output cell data transition)
+                trace-entry (cond-> {:cell       (get state->names state-id)
+                                     :cell-id    (:id cell)
+                                     :transition transition
+                                     :data       (dissoc data :mycelium/trace)}
+                              error (assoc :error error))]
             (if error
               (-> fsm-state
+                  (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
                   (assoc :current-state-id ::fsm/error)
                   (assoc-in [:data :mycelium/schema-error] error))
-              fsm-state))
+              (update-in fsm-state [:data :mycelium/trace] (fnil conj []) trace-entry)))
           fsm-state)))))
 
 (defn wrap-async-callback

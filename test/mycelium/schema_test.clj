@@ -88,18 +88,20 @@
   (testing "Post interceptor passes valid output through"
     (register-test-cell!)
     (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
-          post        (schema/make-post-interceptor state->cell nil)
+          post        (schema/make-post-interceptor state->cell nil nil)
           fsm-state   {:last-state-id    :test/cell-a
                        :current-state-id :some/next
                        :data             {:x 10 :y 42}
-                       :trace            []}]
-      (is (= fsm-state (post fsm-state {}))))))
+                       :trace            []}
+          result      (post fsm-state {})]
+      ;; Data should pass through (with trace appended)
+      (is (= :some/next (:current-state-id result))))))
 
 (deftest post-interceptor-catches-invalid-output-test
   (testing "Post interceptor catches invalid output → redirects to ::fsm/error"
     (register-test-cell!)
     (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
-          post        (schema/make-post-interceptor state->cell nil)
+          post        (schema/make-post-interceptor state->cell nil nil)
           fsm-state   {:last-state-id    :test/cell-a
                        :current-state-id :some/next
                        :data             {:x 10}
@@ -217,7 +219,7 @@
           ;; Reverse map: state → {target → label}
           state->edge-targets {:test/pt-cell {:some/success-target :success
                                               :some/failure-target :failure}}
-          post                (schema/make-post-interceptor state->cell state->edge-targets)
+          post                (schema/make-post-interceptor state->cell state->edge-targets nil)
           ;; :success path — current-state-id is success target
           fsm-state-s {:last-state-id    :test/pt-cell
                        :current-state-id :some/success-target
@@ -225,9 +227,12 @@
           ;; :failure path — current-state-id is failure target
           fsm-state-f {:last-state-id    :test/pt-cell
                        :current-state-id :some/failure-target
-                       :data             {:error-message "oops"}}]
-      (is (= fsm-state-s (post fsm-state-s {})))
-      (is (= fsm-state-f (post fsm-state-f {}))))))
+                       :data             {:error-message "oops"}}
+          result-s (post fsm-state-s {})
+          result-f (post fsm-state-f {})]
+      ;; Should pass validation (current-state-id unchanged)
+      (is (= :some/success-target (:current-state-id result-s)))
+      (is (= :some/failure-target (:current-state-id result-f))))))
 
 (deftest post-interceptor-per-transition-rejects-test
   (testing "Post interceptor rejects data that doesn't match transition-selected schema"
@@ -235,7 +240,7 @@
     (let [state->cell        {:test/pt-cell (cell/get-cell! :test/pt-cell)}
           state->edge-targets {:test/pt-cell {:some/success-target :success
                                               :some/failure-target :failure}}
-          post                (schema/make-post-interceptor state->cell state->edge-targets)
+          post                (schema/make-post-interceptor state->cell state->edge-targets nil)
           ;; Routed to success target but :y is wrong type
           fsm-state   {:last-state-id    :test/pt-cell
                        :current-state-id :some/success-target
@@ -268,3 +273,70 @@
       (wrapped {:x 1})
       (is (= :timeout (deref result 100 :timeout)))
       (is (not= :timeout (deref err 1000 :timeout))))))
+
+;; ===== Post interceptor trace entry tests =====
+
+(deftest post-interceptor-appends-trace-entry-test
+  (testing "Post interceptor appends trace entry with correct structure"
+    (register-test-cell!)
+    (let [state->cell   {:test/cell-a (cell/get-cell! :test/cell-a)}
+          state->names  {:test/cell-a :my-cell}
+          post          (schema/make-post-interceptor state->cell nil state->names)
+          fsm-state     {:last-state-id    :test/cell-a
+                         :current-state-id :some/next
+                         :data             {:x 10 :y 42}
+                         :trace            []}
+          result        (post fsm-state {})]
+      (is (= 1 (count (get-in result [:data :mycelium/trace]))))
+      (let [entry (first (get-in result [:data :mycelium/trace]))]
+        (is (= :my-cell (:cell entry)))
+        (is (= :test/cell-a (:cell-id entry)))
+        (is (nil? (:transition entry)))
+        (is (= {:x 10 :y 42} (:data entry)))))))
+
+(deftest post-interceptor-trace-with-transition-test
+  (testing "Post interceptor trace entry includes transition label from edge targets"
+    (register-per-transition-cell!)
+    (let [state->cell         {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          state->edge-targets {:test/pt-cell {:some/success-target :success}}
+          state->names        {:test/pt-cell :checker}
+          post                (schema/make-post-interceptor state->cell state->edge-targets state->names)
+          fsm-state           {:last-state-id    :test/pt-cell
+                               :current-state-id :some/success-target
+                               :data             {:y 42}
+                               :trace            []}
+          result              (post fsm-state {})]
+      (let [entry (first (get-in result [:data :mycelium/trace]))]
+        (is (= :success (:transition entry)))
+        (is (= :checker (:cell entry)))))))
+
+(deftest post-interceptor-trace-excludes-self-test
+  (testing "Trace entry data snapshot excludes :mycelium/trace to avoid nesting"
+    (register-test-cell!)
+    (let [state->cell  {:test/cell-a (cell/get-cell! :test/cell-a)}
+          state->names {:test/cell-a :step}
+          post         (schema/make-post-interceptor state->cell nil state->names)
+          fsm-state    {:last-state-id    :test/cell-a
+                        :current-state-id :some/next
+                        :data             {:x 10 :y 42 :mycelium/trace [{:cell :prev}]}
+                        :trace            []}
+          result       (post fsm-state {})]
+      (let [entry (second (get-in result [:data :mycelium/trace]))]
+        (is (not (contains? (:data entry) :mycelium/trace)))))))
+
+(deftest post-interceptor-trace-on-error-test
+  (testing "Post interceptor trace entry includes :error on schema failure"
+    (register-test-cell!)
+    (let [state->cell  {:test/cell-a (cell/get-cell! :test/cell-a)}
+          state->names {:test/cell-a :failing}
+          post         (schema/make-post-interceptor state->cell nil state->names)
+          ;; data missing :y — will fail output validation
+          fsm-state    {:last-state-id    :test/cell-a
+                        :current-state-id :some/next
+                        :data             {:x 10}
+                        :trace            []}
+          result       (post fsm-state {})]
+      (is (= ::fsm/error (:current-state-id result)))
+      (let [entry (first (get-in result [:data :mycelium/trace]))]
+        (is (= :failing (:cell entry)))
+        (is (some? (:error entry)))))))

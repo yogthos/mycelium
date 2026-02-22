@@ -182,6 +182,70 @@ Pre and post interceptors validate every transition automatically:
 
 Schema violations redirect to the error state with detailed diagnostics attached at `:mycelium/schema-error`.
 
+## Workflow Trace
+
+Every workflow run produces a `:mycelium/trace` vector in the result data — a step-by-step record of which cells ran, what transition was taken, and what the data looked like after each step.
+
+```clojure
+(let [result (myc/run-workflow
+               {:cells {:start :math/double, :add :math/add-ten}
+                :edges {:start {:done :add}, :add {:done :end}}
+                :dispatches {:start [[:done (constantly true)]]
+                             :add   [[:done (constantly true)]]}}
+               {} {:x 5})]
+  (:mycelium/trace result))
+;; => [{:cell :start, :cell-id :math/double, :transition :done,
+;;      :data {:x 5, :result 10}}
+;;     {:cell :add, :cell-id :math/add-ten, :transition :done,
+;;      :data {:x 5, :result 20}}]
+```
+
+Each trace entry contains:
+
+| Key | Description |
+|-----|-------------|
+| `:cell` | Workflow cell name (e.g. `:start`, `:validate`) |
+| `:cell-id` | Cell registry ID (e.g. `:auth/validate`) |
+| `:transition` | Dispatch label taken (`nil` for unconditional edges) |
+| `:data` | Data snapshot after the handler ran |
+| `:error` | Schema error details (only present on validation failure) |
+
+Data snapshots exclude `:mycelium/trace` itself to avoid recursive nesting.
+
+### Asserting on Traces in Tests
+
+```clojure
+(let [result (fsm/run compiled {} {:data {:count 0}})
+      trace  (:mycelium/trace result)]
+  ;; Verify execution order
+  (is (= [:start :validate :finish] (mapv :cell trace)))
+  ;; Verify transitions taken
+  (is (= [:ok :authorized :done] (mapv :transition trace)))
+  ;; Verify data at each step
+  (is (= 42 (get-in (last trace) [:data :result]))))
+```
+
+### Error Traces
+
+When a schema violation occurs, the trace entry for the failing step includes an `:error` key with the validation details:
+
+```clojure
+(let [error-data (atom nil)
+      compiled   (wf/compile-workflow workflow
+                   {:on-error (fn [_ fsm-state]
+                                (reset! error-data (:data fsm-state))
+                                (:data fsm-state))})]
+  (fsm/run compiled {} {:data {:x 1}})
+  (let [trace (:mycelium/trace @error-data)
+        fail  (last trace)]
+    (is (some? (:error fail)))
+    (is (= :step2 (:cell fail)))))
+```
+
+### Composed Workflow Traces
+
+Child workflow traces flow through automatically — the parent result's `:mycelium/trace` contains the child's step-by-step entries followed by the parent's own entry for the composed cell.
+
 ## Hierarchical Composition
 
 Workflows can be nested as cells in parent workflows:
@@ -360,7 +424,7 @@ mycelium/
 │   ├── dev.clj            ;; Testing harness, visualization
 │   ├── orchestrate.clj    ;; Agent orchestration helpers
 │   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 105 tests, 213 assertions
+└── test/mycelium/         ;; 115 tests, 254 assertions
 ```
 
 ## License
