@@ -248,3 +248,47 @@
         (is (success-pred {:done true}))
         ;; :failure dispatch should return truthy for data with :mycelium/error
         (is (failure-pred {:mycelium/error "boom"}))))))
+
+;; ===== 9. Child workflow's :mycelium/trace present in parent result =====
+
+(deftest child-mycelium-trace-in-parent-test
+  (testing "Child workflow's :mycelium/trace contains step-by-step entries in parent result"
+    (defmethod cell/cell-spec :comp/trace-step1 [_]
+      {:id      :comp/trace-step1
+       :handler (fn [_ data] (assoc data :a 1))
+       :schema  {:input [:map [:x :int]] :output [:map [:a :int]]}})
+
+    (defmethod cell/cell-spec :comp/trace-step2 [_]
+      {:id      :comp/trace-step2
+       :handler (fn [_ data] (assoc data :b 2))
+       :schema  {:input [:map [:a :int]] :output [:map [:b :int]]}})
+
+    (let [child-wf {:cells {:start :comp/trace-step1
+                            :step2 :comp/trace-step2}
+                    :edges {:start {:next :step2}
+                            :step2 {:done :end}}
+                    :dispatches {:start [[:next (constantly true)]]
+                                 :step2 [[:done (constantly true)]]}}]
+      (compose/register-workflow-cell! :comp/traced-multi child-wf
+                                       {:input [:map [:x :int]]
+                                        :output [:map [:b :int]]})
+
+      (let [parent   (wf/compile-workflow
+                      {:cells {:start :comp/traced-multi}
+                       :edges {:start {:success :end, :failure :error}}
+                       :dispatches {:start [[:success (fn [d] (not (:mycelium/error d)))]
+                                            [:failure (fn [d] (some? (:mycelium/error d)))]]}})
+            result   (fsm/run parent {} {:data {:x 1}})
+            trace    (:mycelium/trace result)]
+        ;; Child's :mycelium/trace flows through to parent result
+        ;; 2 entries from child + 1 entry from parent's post-interceptor for the composed cell
+        (is (vector? trace))
+        (is (= 3 (count trace)))
+        ;; First two are child step-by-step entries
+        (is (= :start (:cell (first trace))))
+        (is (= :comp/trace-step1 (:cell-id (first trace))))
+        (is (= :step2 (:cell (second trace))))
+        (is (= :comp/trace-step2 (:cell-id (second trace))))
+        ;; Third is the parent's trace entry for the composed cell itself
+        (is (= :start (:cell (nth trace 2))))
+        (is (= :comp/traced-multi (:cell-id (nth trace 2))))))))

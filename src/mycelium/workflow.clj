@@ -270,6 +270,11 @@
                            cells)
          ;; Build state->edge-targets for post-interceptor transition lookup
          state->edge-targets (build-edge-targets edges)
+         ;; Build state->names for human-readable trace entries
+         state->names (into {}
+                            (map (fn [[cell-name _]]
+                                   [(resolve-state-id cell-name) cell-name]))
+                            cells)
          ;; Build Maestro FSM states
          fsm-states (into {}
                           (map (fn [[cell-name cell-id]]
@@ -286,7 +291,7 @@
                           cells)
          ;; Build interceptors — compose custom pre/post with schema interceptors
          schema-pre  (schema/make-pre-interceptor state->cell)
-         schema-post (schema/make-post-interceptor state->cell state->edge-targets)
+         schema-post (schema/make-post-interceptor state->cell state->edge-targets state->names)
          pre  (if-let [custom-pre (:pre opts)]
                 (fn [fsm-state resources]
                   (-> (schema-pre fsm-state resources)
