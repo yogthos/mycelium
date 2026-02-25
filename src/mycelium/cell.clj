@@ -1,7 +1,6 @@
 (ns mycelium.cell
   "Cell registry for Mycelium. Cells are registered via `defmethod cell-spec`."
-  (:require [clojure.set]
-            [malli.core :as m]))
+  (:require [mycelium.validation :as v]))
 
 (defmulti cell-spec
   "Multimethod-backed cell registry. Dispatches on cell-id keyword,
@@ -19,28 +18,6 @@
     (remove-method cell-spec k))
   (reset! cell-overrides {}))
 
-(defn- validate-schema! [schema label]
-  (try
-    (m/schema schema)
-    (catch Exception e
-      (throw (ex-info (str "Invalid Malli schema for " label ": " (ex-message e))
-                      {:label label :schema schema}
-                      e)))))
-
-(defn- validate-output-schema!
-  "Validates an output schema which may be a single schema (vector) or per-transition map.
-   If a map, validates each value as a Malli schema."
-  [output-schema label]
-  (cond
-    (vector? output-schema)
-    (validate-schema! output-schema label)
-
-    (map? output-schema)
-    (doseq [[k v] output-schema]
-      (validate-schema! v (str label " transition " k)))
-
-    :else
-    (validate-schema! output-schema label)))
 
 (defn get-cell
   "Returns the cell spec for the given id, or nil if not found."
@@ -67,9 +44,9 @@
     (throw (ex-info (str "Cell " cell-id " not found in registry")
                     {:id cell-id})))
   (when (:input schema)
-    (validate-schema! (:input schema) (str cell-id " :input")))
+    (v/validate-malli-schema! (:input schema) (str cell-id " :input")))
   (when (:output schema)
-    (validate-output-schema! (:output schema) (str cell-id " :output")))
+    (v/validate-output-schema! (:output schema) (str cell-id " :output")))
   (swap! cell-overrides update cell-id merge {:schema schema})
   schema)
 
@@ -84,9 +61,9 @@
                     {:id cell-id})))
   (when schema
     (when (:input schema)
-      (validate-schema! (:input schema) (str cell-id " :input")))
+      (v/validate-malli-schema! (:input schema) (str cell-id " :input")))
     (when (:output schema)
-      (validate-output-schema! (:output schema) (str cell-id " :output"))))
+      (v/validate-output-schema! (:output schema) (str cell-id " :output"))))
   (let [overrides (cond-> {}
                     schema   (assoc :schema schema)
                     requires (assoc :requires requires))]
