@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [mycelium.cell :as cell]
             [mycelium.schema :as schema]
+            [mycelium.validation :as v]
             [maestro.core :as fsm]))
 
 ;; ===== State ID resolution =====
@@ -47,45 +48,6 @@
   (doseq [[_name cell-id] cells]
     (cell/get-cell! cell-id)))
 
-(defn- validate-edge-targets!
-  "Checks all edge targets reference valid cell names or :end/:error/:halt."
-  [edges-map cells-map]
-  (let [valid-names (into #{:end :error :halt} (keys cells-map))]
-    (doseq [[from edge-def] edges-map
-            target (if (keyword? edge-def) [edge-def] (vals edge-def))]
-      (when-not (contains? valid-names target)
-        (throw (ex-info (str "Invalid edge target " target " from " from
-                             ". Valid targets: " valid-names)
-                        {:from from :target target :valid valid-names}))))))
-
-(defn- validate-reachability!
-  "BFS from :start, checks all cells are reachable."
-  [edges-map cells-map]
-  (let [cell-names (set (keys cells-map))
-        ;; Build adjacency: cell-name -> #{target-cell-names}
-        adjacency  (into {}
-                         (map (fn [[from edge-def]]
-                                [from (if (keyword? edge-def)
-                                        #{edge-def}
-                                        (set (vals edge-def)))]))
-                         edges-map)
-        ;; BFS
-        reachable  (loop [queue  (conj clojure.lang.PersistentQueue/EMPTY :start)
-                          visited #{}]
-                     (if (empty? queue)
-                       visited
-                       (let [node (peek queue)
-                             queue (pop queue)]
-                         (if (visited node)
-                           (recur queue visited)
-                           (let [neighbors (get adjacency node #{})]
-                             (recur (into queue neighbors)
-                                    (conj visited node)))))))]
-    (let [unreachable (set/difference cell-names reachable)]
-      (when (seq unreachable)
-        (throw (ex-info (str "Unreachable cells: " unreachable)
-                        {:unreachable unreachable}))))))
-
 (defn- merge-default-dispatches
   "Merges default dispatches from cell specs into the workflow dispatches.
    For each cell with map edges and no explicit dispatch, checks the cell spec
@@ -102,31 +64,6 @@
           (or dispatches-map {})
           edges-map))
 
-(defn- validate-dispatch-coverage!
-  "For each cell with map edges, checks dispatch labels match edge keys exactly.
-   Dispatches are vectors of [label pred] pairs; labels must match edge keys.
-   Cells with unconditional edges (keyword) need no dispatch entry."
-  [edges-map dispatches-map]
-  (doseq [[cell-name edge-def] edges-map]
-    (when (map? edge-def)
-      (let [edge-keys     (set (keys edge-def))
-            dispatch-vec  (get dispatches-map cell-name)
-            dispatch-keys (when dispatch-vec (set (map first dispatch-vec)))]
-        (when-not dispatch-vec
-          (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
-                          {:cell-name cell-name :edge-keys edge-keys})))
-        (let [missing (set/difference edge-keys dispatch-keys)]
-          (when (seq missing)
-            (throw (ex-info (str "Cell " cell-name " has edge(s) " missing
-                                 " with no dispatch predicates")
-                            {:cell-name cell-name :missing missing
-                             :edge-keys edge-keys :dispatch-keys dispatch-keys}))))
-        (let [extra (set/difference dispatch-keys edge-keys)]
-          (when (seq extra)
-            (throw (ex-info (str "Cell " cell-name " has dispatch(es) " extra
-                                 " that don't match any edge")
-                            {:cell-name cell-name :extra extra
-                             :edge-keys edge-keys :dispatch-keys dispatch-keys}))))))))
 
 (defn- get-map-keys
   "Extracts top-level keys from a Malli :map schema. Returns nil if not a :map schema.
@@ -230,10 +167,11 @@
    Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
   [{:keys [cells edges dispatches]}]
   (validate-cells-exist! cells)
-  (validate-edge-targets! edges cells)
-  (validate-reachability! edges cells)
+  (let [cell-names (set (keys cells))]
+    (v/validate-edge-targets! edges cell-names)
+    (v/validate-reachability! edges cell-names))
   (let [effective-dispatches (merge-default-dispatches dispatches edges cells)]
-    (validate-dispatch-coverage! edges effective-dispatches))
+    (v/validate-dispatch-coverage! edges effective-dispatches))
   (validate-schema-chain! edges cells))
 
 ;; ===== Compilation =====

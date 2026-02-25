@@ -1,37 +1,13 @@
 (ns mycelium.manifest
   "Manifest loading, validation, cell-brief generation, and workflow construction."
   (:require [clojure.edn :as edn]
-            [clojure.set :as cset]
             [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
-            [mycelium.cell :as cell]))
+            [mycelium.cell :as cell]
+            [mycelium.validation :as v]))
 
-;; ===== Schema validation helpers =====
-
-(defn- validate-malli-schema!
-  "Validates that a Malli schema definition is well-formed."
-  [schema label]
-  (try
-    (m/schema schema)
-    (catch Exception e
-      (throw (ex-info (str "Invalid Malli schema in manifest for " label ": " (ex-message e))
-                      {:label label :schema schema}
-                      e)))))
-
-(defn- validate-output-schema!
-  "Validates an output schema which may be a single schema (vector) or per-transition map."
-  [output-schema cell-name]
-  (cond
-    (vector? output-schema)
-    (validate-malli-schema! output-schema (str cell-name " :output"))
-
-    (map? output-schema)
-    (doseq [[k v] output-schema]
-      (validate-malli-schema! v (str cell-name " :output transition " k)))
-
-    :else
-    (validate-malli-schema! output-schema (str cell-name " :output"))))
+;; ===== Cell definition validation =====
 
 (defn- validate-cell-def!
   "Validates a single cell definition within a manifest."
@@ -44,33 +20,8 @@
     (throw (ex-info (str "Cell " cell-name " missing :schema :input") {:cell-name cell-name})))
   (when-not (get-in cell-def [:schema :output])
     (throw (ex-info (str "Cell " cell-name " missing :schema :output") {:cell-name cell-name})))
-  (validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
-  (validate-output-schema! (get-in cell-def [:schema :output]) cell-name))
-
-;; ===== Dispatch validation =====
-
-(defn- validate-dispatch-coverage!
-  "For each cell with map edges, checks dispatch labels match edge keys exactly.
-   Dispatches are vectors of [label pred] pairs. Unconditional edges (keyword) need no dispatch."
-  [edges dispatches]
-  (doseq [[cell-name edge-def] edges]
-    (when (map? edge-def)
-      (let [edge-keys     (set (keys edge-def))
-            dispatch-vec  (get dispatches cell-name)
-            dispatch-keys (when dispatch-vec (set (map first dispatch-vec)))]
-        (when-not dispatch-vec
-          (throw (ex-info (str "Cell " cell-name " has map edges but no dispatch defined")
-                          {:cell-name cell-name :edge-keys edge-keys})))
-        (let [missing (cset/difference edge-keys dispatch-keys)]
-          (when (seq missing)
-            (throw (ex-info (str "Cell " cell-name " has edge(s) " missing
-                                  " with no dispatch predicates")
-                            {:cell-name cell-name :missing missing}))))
-        (let [extra (cset/difference dispatch-keys edge-keys)]
-          (when (seq extra)
-            (throw (ex-info (str "Cell " cell-name " has dispatch(es) " extra
-                                  " that don't match any edge")
-                            {:cell-name cell-name :extra extra}))))))))
+  (v/validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
+  (v/validate-output-schema! (get-in cell-def [:schema :output]) (str cell-name " :output")))
 
 ;; ===== Manifest validation =====
 
@@ -86,42 +37,15 @@
   ;; Validate each cell definition
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
-  ;; Validate edge targets reference valid cell names or :end/:error/:halt
-  (let [valid-names (into #{:end :error :halt} (keys cells))]
-    (doseq [[from edge-def] edges
-            target (if (keyword? edge-def) [edge-def] (vals edge-def))]
-      (when-not (contains? valid-names target)
-        (throw (ex-info (str "Invalid edge target " target " from " from)
-                        {:from from :target target :valid valid-names})))))
-  ;; Validate all cells have edges defined
-  (doseq [[cell-name _] cells]
-    (when-not (get edges cell-name)
-      (throw (ex-info (str "Cell " cell-name " has no edges defined")
-                      {:cell-name cell-name}))))
-  ;; Validate dispatch coverage for map edges
-  (validate-dispatch-coverage! edges (or dispatches {}))
-  ;; Validate reachability (BFS from :start)
-  (let [cell-names (set (keys cells))
-        adjacency  (into {}
-                         (map (fn [[from edge-def]]
-                                [from (if (keyword? edge-def)
-                                        #{edge-def}
-                                        (set (vals edge-def)))]))
-                         edges)
-        reachable  (loop [queue   (conj clojure.lang.PersistentQueue/EMPTY :start)
-                          visited #{}]
-                     (if (empty? queue)
-                       visited
-                       (let [node  (peek queue)
-                             queue (pop queue)]
-                         (if (visited node)
-                           (recur queue visited)
-                           (recur (into queue (get adjacency node #{}))
-                                  (conj visited node))))))
-        unreachable (cset/difference cell-names reachable)]
-    (when (seq unreachable)
-      (throw (ex-info (str "Unreachable cells in manifest: " unreachable)
-                      {:unreachable unreachable}))))
+  ;; Validate edge targets, edges exist for all cells, dispatch coverage, reachability
+  (let [cell-names (set (keys cells))]
+    (v/validate-edge-targets! edges cell-names)
+    (doseq [[cell-name _] cells]
+      (when-not (get edges cell-name)
+        (throw (ex-info (str "Cell " cell-name " has no edges defined")
+                        {:cell-name cell-name}))))
+    (v/validate-dispatch-coverage! edges (or dispatches {}))
+    (v/validate-reachability! edges cell-names))
   manifest)
 
 ;; ===== Manifest loading =====
