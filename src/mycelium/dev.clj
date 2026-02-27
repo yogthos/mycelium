@@ -4,7 +4,9 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [mycelium.cell :as cell]
-            [mycelium.schema :as schema]))
+            [mycelium.schema :as schema]
+            [mycelium.workflow :as wf]
+            [maestro.core :as fsm]))
 
 (defn test-cell
   "Runs a single cell in isolation with full schema validation.
@@ -172,3 +174,44 @@
      :failing     (count (filter #(= :failing (:status %)) cell-statuses))
      :pending     (count (filter #(= :pending (:status %)) cell-statuses))
      :cells       cell-statuses}))
+
+(defn analyze-workflow
+  "Runs Maestro's static analysis on a workflow definition.
+   Returns {:reachable #{...} :unreachable #{...} :no-path-to-end #{...} :cycles [...]}
+   with state IDs reverse-resolved to cell name keywords for readability."
+  [{:keys [cells edges dispatches] :as workflow-def}]
+  (let [;; Build state->names for reverse resolution
+        state->names (into {}
+                           (map (fn [[cell-name _]]
+                                  [(wf/resolve-state-id cell-name) cell-name]))
+                           cells)
+        resolve-name (fn [sid] (get state->names sid sid))
+        ;; Build the FSM spec (same as compile-workflow, minus interceptors)
+        effective-dispatches (reduce (fn [acc [cell-name edge-def]]
+                                      (if (and (map? edge-def) (not (get acc cell-name)))
+                                        (let [cell-id (get cells cell-name)
+                                              c (when cell-id (cell/get-cell cell-id))]
+                                          (if-let [defaults (:default-dispatches c)]
+                                            (assoc acc cell-name defaults)
+                                            acc))
+                                        acc))
+                                    (or dispatches {})
+                                    edges)
+        fsm-states (into {}
+                         (map (fn [[cell-name cell-id]]
+                                (let [c        (cell/get-cell! cell-id)
+                                      state-id (wf/resolve-state-id cell-name)
+                                      edge-def (get edges cell-name)
+                                      dispatch-vec (get effective-dispatches cell-name)]
+                                  [state-id
+                                   (merge
+                                    {:handler    (:handler c)
+                                     :dispatches (wf/compile-edges edge-def dispatch-vec)}
+                                    (when (:async? c) {:async? true}))])))
+                         cells)
+        spec     {:fsm fsm-states}
+        analysis (fsm/analyze spec)]
+    {:reachable      (set (map resolve-name (:reachable analysis)))
+     :unreachable    (set (map resolve-name (:unreachable analysis)))
+     :no-path-to-end (set (map resolve-name (:no-path-to-end analysis)))
+     :cycles         (mapv (fn [cycle] (mapv resolve-name cycle)) (:cycles analysis))}))

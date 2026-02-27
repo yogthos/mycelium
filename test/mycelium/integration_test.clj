@@ -321,7 +321,140 @@
         (is (= :step2 (:cell (second trace))))
         (is (some? (:error (second trace))))))))
 
-;; ===== 13. Trace data snapshots don't contain :mycelium/trace =====
+;; ===== 13. Trace entries include :duration-ms from Maestro =====
+
+(deftest trace-duration-ms-test
+  (testing "Trace entries include :duration-ms from Maestro's timing"
+    (defmethod cell/cell-spec :int/timed-a [_]
+      {:id      :int/timed-a
+       :handler (fn [_ data] (assoc data :a 1))
+       :schema  {:input [:map [:x :int]] :output [:map [:a :int]]}})
+
+    (defmethod cell/cell-spec :int/timed-b [_]
+      {:id      :int/timed-b
+       :handler (fn [_ data]
+                  (Thread/sleep 5)
+                  (assoc data :b 2))
+       :schema  {:input [:map [:a :int]] :output [:map [:b :int]]}})
+
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start :int/timed-a
+                             :step2 :int/timed-b}
+                     :edges {:start {:next :step2}
+                             :step2 {:done :end}}
+                     :dispatches {:start [[:next (constantly true)]]
+                                  :step2 [[:done (constantly true)]]}})
+          result   (fsm/run compiled {} {:data {:x 10}})
+          trace    (:mycelium/trace result)]
+      (is (= 2 (count trace)))
+      ;; Both trace entries should have :duration-ms
+      (doseq [entry trace]
+        (is (number? (:duration-ms entry))
+            (str "Trace entry for " (:cell entry) " should have :duration-ms")))
+      ;; The sleeping cell should have measurable duration
+      (is (>= (:duration-ms (second trace)) 1.0)))))
+
+;; ===== 14. Error trace entries include :duration-ms =====
+
+(deftest trace-duration-ms-on-error-test
+  (testing "Trace entries include :duration-ms even when output validation fails"
+    (defmethod cell/cell-spec :int/timed-ok [_]
+      {:id      :int/timed-ok
+       :handler (fn [_ data] (assoc data :a 1))
+       :schema  {:input [:map [:x :int]] :output [:map [:a :int]]}})
+
+    (defmethod cell/cell-spec :int/timed-bad [_]
+      {:id      :int/timed-bad
+       :handler (fn [_ data]
+                  (Thread/sleep 5)
+                  (assoc data :b "not-an-int"))
+       :schema  {:input [:map [:a :int]] :output [:map [:b :int]]}})
+
+    (let [error-data (atom nil)
+          compiled   (wf/compile-workflow
+                      {:cells {:start :int/timed-ok
+                               :step2 :int/timed-bad}
+                       :edges {:start {:next :step2}
+                               :step2 {:done :end}}
+                       :dispatches {:start [[:next (constantly true)]]
+                                    :step2 [[:done (constantly true)]]}}
+                      {:on-error (fn [_ fsm-state]
+                                   (reset! error-data (:data fsm-state))
+                                   (:data fsm-state))})]
+      (fsm/run compiled {} {:data {:x 1}})
+      (let [trace (:mycelium/trace @error-data)]
+        (is (= 2 (count trace)))
+        ;; Both entries should have duration-ms
+        (doseq [entry trace]
+          (is (number? (:duration-ms entry))
+              (str "Trace entry for " (:cell entry) " should have :duration-ms")))
+        ;; The error entry should also have :error AND :duration-ms
+        (is (some? (:error (second trace))))
+        (is (number? (:duration-ms (second trace))))))))
+
+;; ===== 15. Looping workflow trace entries each have :duration-ms =====
+
+(deftest trace-duration-ms-looping-test
+  (testing "Each iteration of a looping workflow has its own :duration-ms"
+    (defmethod cell/cell-spec :int/timed-loop [_]
+      {:id      :int/timed-loop
+       :handler (fn [_ data] (assoc data :count (inc (:count data))))
+       :schema  {:input [:map [:count :int]] :output [:map [:count :int]]}})
+
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start :int/timed-loop}
+                     :edges {:start {:again :start, :done :end}}
+                     :dispatches {:start [[:again (fn [d] (< (:count d) 3))]
+                                          [:done  (fn [d] (>= (:count d) 3))]]}})
+          result   (fsm/run compiled {} {:data {:count 0}})
+          trace    (:mycelium/trace result)]
+      (is (= 3 (count trace)))
+      ;; Each iteration should have its own :duration-ms
+      (doseq [entry trace]
+        (is (number? (:duration-ms entry))
+            (str "Loop iteration should have :duration-ms"))))))
+
+;; ===== 16. Branching workflow trace has :duration-ms on taken path =====
+
+(deftest trace-duration-ms-branching-test
+  (testing "Branching workflow trace entries on the taken path have :duration-ms"
+    (defmethod cell/cell-spec :int/timed-router [_]
+      {:id      :int/timed-router
+       :handler (fn [_ data] data)
+       :schema  {:input [:map [:value :int]] :output [:map]}})
+
+    (defmethod cell/cell-spec :int/timed-path [_]
+      {:id      :int/timed-path
+       :handler (fn [_ data] (assoc data :result "done"))
+       :schema  {:input [:map [:value :int]] :output [:map [:result :string]]}})
+
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start  :int/timed-router
+                             :path-a :int/timed-path
+                             :path-b :int/timed-path}
+                     :edges {:start  {:a :path-a, :b :path-b}
+                             :path-a {:done :end}
+                             :path-b {:done :end}}
+                     :dispatches {:start  [[:a (fn [d] (> (:value d) 5))]
+                                           [:b (fn [d] (<= (:value d) 5))]]
+                                  :path-a [[:done (constantly true)]]
+                                  :path-b [[:done (constantly true)]]}})]
+      ;; Take path A
+      (let [result (fsm/run compiled {} {:data {:value 10}})
+            trace  (:mycelium/trace result)]
+        (is (= 2 (count trace)))
+        (is (= [:start :path-a] (mapv :cell trace)))
+        (doseq [entry trace]
+          (is (number? (:duration-ms entry)))))
+      ;; Take path B
+      (let [result (fsm/run compiled {} {:data {:value 2}})
+            trace  (:mycelium/trace result)]
+        (is (= 2 (count trace)))
+        (is (= [:start :path-b] (mapv :cell trace)))
+        (doseq [entry trace]
+          (is (number? (:duration-ms entry))))))))
+
+;; ===== 17. Trace data snapshots don't contain :mycelium/trace =====
 
 (deftest trace-no-nesting-test
   (testing "Trace :data snapshots don't contain :mycelium/trace (no recursive nesting)"

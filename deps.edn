@@ -1,7 +1,7 @@
 {:paths ["src" "resources"]
  :deps  {org.clojure/clojure {:mvn/version "1.12.0"}
          io.github.yogthos/maestro {:git/url "https://github.com/yogthos/maestro"
-                                    :git/sha "b2256aa24ac60adb4921618c9bf6de4f33c54320"}
+                                    :git/sha "663480b4da9e982635836a063176f52f6686357a"}
          metosin/malli       {:mvn/version "0.17.0"}}
  :aliases
  {:dev  {:extra-paths ["dev" "test" "examples"]

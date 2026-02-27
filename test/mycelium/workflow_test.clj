@@ -392,3 +392,80 @@
                     {:cells {:start :test/simple}
                      :edges {:start :end}})]
       (is (some? compiled)))))
+
+;; ===== No-path-to-end validation via fsm/analyze =====
+
+(deftest no-path-to-end-validation-test
+  (testing "compile-workflow throws when a reachable state has no path to :end"
+    (defmethod cell/cell-spec :test/dead-end [_]
+      {:id :test/dead-end
+       :handler (fn [_ data] data)
+       :schema {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :test/route-cell [_]
+      {:id :test/route-cell
+       :handler (fn [_ data] data)
+       :schema {:input [:map] :output [:map]}})
+    ;; start → dead-end → halt (no path to :end from dead-end)
+    ;; start also has path to :end, but dead-end only goes to :halt
+    (is (thrown-with-msg? Exception #"no path to end"
+          (wf/compile-workflow
+           {:cells {:start    :test/route-cell
+                    :dead-end :test/dead-end}
+            :edges {:start    {:ok :dead-end, :skip :end}
+                    :dead-end :halt}
+            :dispatches {:start [[:ok (fn [_] true)]
+                                  [:skip (fn [_] false)]]}})))))
+
+;; Regression guard: looping workflows with escape routes still compile
+
+(deftest looping-workflow-still-compiles-test
+  (testing "Looping workflow with path to :end compiles (analyze doesn't reject it)"
+    (defmethod cell/cell-spec :test/loop-cell [_]
+      {:id :test/loop-cell
+       :handler (fn [_ data] (update data :count (fnil inc 0)))
+       :schema {:input [:map] :output [:map [:count :int]]}})
+    ;; Self-loop with escape to :end — must still compile
+    (is (some? (wf/compile-workflow
+                {:cells {:start :test/loop-cell}
+                 :edges {:start {:again :start, :done :end}}
+                 :dispatches {:start [[:again (fn [d] (< (:count d 0) 3))]
+                                      [:done  (fn [d] (>= (:count d 0) 3))]]}})))))
+
+(deftest multi-node-loop-still-compiles-test
+  (testing "Multi-node loop (A→B→A) with escape compiles"
+    (defmethod cell/cell-spec :test/loop-a [_]
+      {:id :test/loop-a
+       :handler (fn [_ data] (update data :n (fnil inc 0)))
+       :schema {:input [:map] :output [:map [:n :int]]}})
+    (defmethod cell/cell-spec :test/loop-b [_]
+      {:id :test/loop-b
+       :handler (fn [_ data] (update data :n inc))
+       :schema {:input [:map [:n :int]] :output [:map [:n :int]]}})
+    (is (some? (wf/compile-workflow
+                {:cells {:start :test/loop-a
+                         :step-b :test/loop-b}
+                 :edges {:start  {:next :step-b}
+                         :step-b {:loop :start, :done :end}}
+                 :dispatches {:start  [[:next (constantly true)]]
+                              :step-b [[:loop (fn [d] (< (:n d) 4))]
+                                        [:done (fn [d] (>= (:n d) 4))]]}})))))
+
+(deftest no-path-to-end-error-only-route-test
+  (testing "Cell routing only to :error is flagged as no-path-to-end"
+    (defmethod cell/cell-spec :test/error-only [_]
+      {:id :test/error-only
+       :handler (fn [_ data] data)
+       :schema {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :test/pre-error [_]
+      {:id :test/pre-error
+       :handler (fn [_ data] data)
+       :schema {:input [:map] :output [:map]}})
+    (is (thrown-with-msg? Exception #"no path to end"
+          (wf/compile-workflow
+           {:cells {:start     :test/pre-error
+                    :error-only :test/error-only}
+            :edges {:start      {:next :error-only, :skip :end}
+                    :error-only :error}
+            :dispatches {:start [[:next (fn [_] true)]
+                                  [:skip (fn [_] false)]]}})))))
+
