@@ -162,6 +162,23 @@ External dependencies are injected, never acquired by cells:
    :async?      true})
 ```
 
+## Accumulating Data Model
+
+Cells communicate through an accumulating data map. Every cell receives the full map of all keys produced by every prior cell in the path — not just its immediate predecessor. Cells `assoc` their outputs into this map, and the enriched map flows forward.
+
+This means a cell can depend on data produced several steps earlier without any special wiring:
+
+```
+start → validate-session → fetch-profile → fetch-orders → render-summary → end
+         produces :user-id   produces :profile  produces :orders   needs :profile AND :orders
+```
+
+- **Non-adjacent dependency**: `:fetch-orders` needs `:user-id` from `:validate-session` (two steps back). It works because `:user-id` persists through `:fetch-profile`.
+- **Multi-source inputs**: `:render-summary` needs both `:profile` (from `:fetch-profile`) and `:orders` (from `:fetch-orders`). Both are present in the accumulated map.
+- **Schema chain validation**: `compile-workflow` walks each path from `:start`, accumulating declared output keys at every edge. By the time it reaches `:render-summary`, the available key set includes outputs from all prior cells — so both `:profile` and `:orders` are in scope.
+
+This model handles linear and branching (tree) topologies. For true parallel fan-out/fan-in (diamond shapes where cells execute concurrently and merge results), you would need an orchestration layer — see `orchestrate.clj` for that pattern.
+
 ## Compile-Time Validation
 
 `compile-workflow` validates before any code runs:

@@ -63,6 +63,23 @@ graph LR
     err -->|done| stop
 ```
 
+### JSON API — Order Summary (multi-source inputs)
+
+```mermaid
+graph LR
+    start[extract-session] -->|success| validate[validate-session]
+    start -->|failure| err[render-error]
+    validate -->|authorized| fetch[fetch-profile]
+    validate -->|unauthorized| err
+    fetch -->|found| orders[fetch-orders]
+    fetch -->|not-found| err
+    orders -->|done| summary[render-summary]
+    summary -->|done| stop((end))
+    err -->|done| stop
+```
+
+This workflow exercises **multi-source cell inputs**: `:render-summary` needs `:profile` from `:fetch-profile` AND `:orders` from `:fetch-orders` — data produced by two different cells. It works because Mycelium passes an accumulating data map where every cell sees all keys from all prior cells in the path, not just its immediate predecessor.
+
 Each box is a **cell** — an isolated unit with a defined handler and input/output schema. The manifests (`resources/workflows/*.edn`) are the single source of truth for schemas, edges, and dispatch predicates.
 
 ## Project Structure
@@ -86,10 +103,13 @@ user_onboarding/
 │   │   ├── login-submit.edn                  # Login form submission
 │   │   ├── dashboard.edn                     # Dashboard (token-based)
 │   │   ├── user-list.edn                     # All users list
-│   │   └── user-profile.edn                  # Single user profile
+│   │   ├── user-profile.edn                  # Single user profile
+│   │   └── order-summary.edn                 # Order summary (multi-source inputs)
 │   └── migrations/
 │       ├── 20240101000000-initial-schema.up.sql
-│       └── 20240101000000-initial-schema.down.sql
+│       ├── 20240101000000-initial-schema.down.sql
+│       ├── 20240102000000-add-orders.up.sql
+│       └── 20240102000000-add-orders.down.sql
 ├── src/app/
 │   ├── core.clj                              # Entry point (Integrant lifecycle)
 │   ├── routes.clj                            # Ring/Reitit HTTP routes
@@ -98,17 +118,19 @@ user_onboarding/
 │   │   ├── onboarding.clj                    # JSON API workflow loader
 │   │   ├── login.clj                         # Login page + submit loaders
 │   │   ├── dashboard.clj                     # Dashboard workflow loader
-│   │   └── users.clj                         # User list/profile loaders
+│   │   ├── users.clj                         # User list/profile loaders
+│   │   └── order_summary.clj                 # Order summary loader
 │   └── cells/
 │       ├── auth.clj                          # :auth/parse-request, :auth/validate-session, :auth/extract-session
-│       ├── user.clj                          # :user/fetch-profile, :user/fetch-all-users, :user/fetch-profile-by-id
-│       └── ui.clj                            # :ui/render-home, :ui/render-login-page, :ui/render-dashboard, :ui/render-error, :ui/render-user-list, :ui/render-user-profile
+│       ├── user.clj                          # :user/fetch-profile, :user/fetch-all-users, :user/fetch-profile-by-id, :user/fetch-orders
+│       └── ui.clj                            # :ui/render-home, :ui/render-login-page, :ui/render-dashboard, :ui/render-error, :ui/render-user-list, :ui/render-user-profile, :ui/render-order-summary
 └── test/app/
     ├── cells/
     │   ├── auth_test.clj                     # Unit tests for auth cells
     │   ├── user_test.clj                     # Unit tests for user cells
     │   └── ui_test.clj                       # Unit tests for UI cells
-    └── integration_test.clj                  # End-to-end workflow tests
+    ├── integration_test.clj                  # End-to-end workflow tests
+    └── multi_source_input_test.clj           # Multi-source input tests (order summary)
 ```
 
 ## How It Works
@@ -171,10 +193,16 @@ The test suite includes:
 
 ## Database
 
-Uses SQLite with automatic migrations via Migratus. The initial migration creates `users` and `sessions` tables with seed data:
+Uses SQLite with automatic migrations via Migratus. The initial migration creates `users` and `sessions` tables with seed data. A second migration adds the `orders` table:
 
 | User  | Token          | Valid |
 |-------|----------------|-------|
 | alice | tok_abc123     | yes   |
 | bob   | tok_bob456     | yes   |
 | alice | tok_expired    | no    |
+
+| Order   | User  | Item        | Amount |
+|---------|-------|-------------|--------|
+| ord_001 | alice | Widget Pro  | 29.99  |
+| ord_002 | alice | Gadget Max  | 49.99  |
+| ord_003 | bob   | Widget Pro  | 29.99  |
