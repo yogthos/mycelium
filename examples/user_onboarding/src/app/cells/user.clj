@@ -19,6 +19,13 @@
               (let [users (db/get-all-users db)]
                 (assoc data :users (vec users))))})
 
+(defmethod cell/cell-spec :user/fetch-orders [_]
+  {:id      :user/fetch-orders
+   :doc     "Fetch order history for a user"
+   :handler (fn [{:keys [db]} data]
+              (let [orders (db/get-user-orders db (:user-id data))]
+                (assoc data :orders (vec orders))))})
+
 (defmethod cell/cell-spec :user/fetch-profile-by-id [_]
   {:id      :user/fetch-profile-by-id
    :doc     "Extract user-id from path params and fetch profile"

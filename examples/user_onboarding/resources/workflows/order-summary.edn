@@ -1,0 +1,114 @@
+{:id :order-summary
+ :doc "Order summary page: authenticates user, fetches profile AND order
+       history in sequence, then renders a combined summary.
+
+       This exercises a cell (:render-summary) that requires inputs
+       produced by two different earlier cells (:fetch-profile outputs
+       :profile, :fetch-orders outputs :orders). Because data accumulates
+       through the pipeline, :render-summary sees both keys even though
+       it is not directly adjacent to both producers.
+
+       The graph looks like:
+         start → validate-session → fetch-profile → fetch-orders → render-summary → end
+                                                                                  ↘ error ← (any failure)"
+
+ :cells
+ {:start
+  {:id       :auth/extract-session
+   :doc      "Extract auth token from query parameters"
+   :schema   {:input  [:map
+                         [:http-request [:map
+                           [:query-params map?]]]]
+              :output {:success [:map
+                                  [:auth-token :string]]
+                       :failure [:map
+                                  [:error-type :keyword]
+                                  [:error-message :string]]}}
+   :requires []}
+
+  :validate-session
+  {:id       :auth/validate-session
+   :doc      "Check credentials against the session store"
+   :schema   {:input  [:map
+                         [:auth-token :string]]
+              :output {:authorized   [:map
+                                       [:session-valid :boolean]
+                                       [:user-id :string]]
+                       :unauthorized [:map
+                                       [:session-valid :boolean]
+                                       [:error-type :keyword]
+                                       [:error-message :string]]}}
+   :requires [:db]}
+
+  :fetch-profile
+  {:id       :user/fetch-profile
+   :doc      "Fetch user profile from database"
+   :schema   {:input  [:map
+                         [:user-id :string]
+                         [:session-valid :boolean]]
+              :output {:found     [:map
+                                    [:profile [:map
+                                      [:name :string]
+                                      [:email :string]]]]
+                       :not-found [:map
+                                    [:error-type :keyword]
+                                    [:error-message :string]]}}
+   :requires [:db]}
+
+  ;; This cell needs :user-id which was produced by :validate-session,
+  ;; two steps back. It works because data accumulates through the map.
+  :fetch-orders
+  {:id       :user/fetch-orders
+   :doc      "Fetch order history — needs :user-id from validate-session (not adjacent)"
+   :schema   {:input  [:map
+                         [:user-id :string]]
+              :output [:map
+                        [:orders [:vector :map]]]}
+   :requires [:db]}
+
+  ;; This cell needs BOTH :profile (from :fetch-profile) AND
+  ;; :orders (from :fetch-orders) — data from two different cells.
+  :render-summary
+  {:id       :ui/render-order-summary
+   :doc      "Render combined summary — needs :profile AND :orders from different cells"
+   :schema   {:input  [:map
+                         [:profile [:map
+                           [:name :string]
+                           [:email :string]]]
+                         [:orders [:vector :map]]]
+              :output [:map
+                        [:http-response [:map
+                          [:status :int]
+                          [:body map?]]]]}
+   :requires []}
+
+  :render-error
+  {:id       :ui/render-error
+   :doc      "Render a styled error page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]
+                        [:error-status :int]]}
+   :requires []}}
+
+ :edges
+ {:start            {:success :validate-session
+                     :failure :render-error}
+  :validate-session {:authorized   :fetch-profile
+                     :unauthorized :render-error}
+  :fetch-profile    {:found     :fetch-orders
+                     :not-found :render-error}
+  :fetch-orders     {:done :render-summary}
+  :render-summary   {:done :end}
+  :render-error     {:done :end}}
+
+ :dispatches
+ {:start            [[:success (fn [data] (:auth-token data))]
+                     [:failure (fn [data] (:error-type data))]]
+  :validate-session [[:authorized   (fn [data] (:session-valid data))]
+                     [:unauthorized (fn [data] (not (:session-valid data)))]]
+  :fetch-profile    [[:found     (fn [data] (:profile data))]
+                     [:not-found (fn [data] (:error-type data))]]
+  :fetch-orders     [[:done (fn [_] true)]]
+  :render-summary   [[:done (fn [_] true)]]
+  :render-error     [[:done (fn [_] true)]]}}

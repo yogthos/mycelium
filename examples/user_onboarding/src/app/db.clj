@@ -22,3 +22,11 @@
   (jdbc/execute! ds
     ["SELECT id, name, email FROM users ORDER BY id"]
     {:builder-fn rs/as-unqualified-lower-maps}))
+
+(defn get-user-orders
+  "Returns orders for a user, or empty vec if none."
+  [ds user-id]
+  (jdbc/execute! ds
+    ["SELECT id, item, amount, created_at FROM orders WHERE user_id = ? ORDER BY created_at DESC"
+     user-id]
+    {:builder-fn rs/as-unqualified-lower-maps}))

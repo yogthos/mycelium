@@ -45,6 +45,21 @@
                                                   :message (:error-message data "An unexpected error occurred")})
                        :error-status status)))})
 
+(defmethod cell/cell-spec :ui/render-order-summary [_]
+  {:id      :ui/render-order-summary
+   :doc     "Render order summary combining profile and order history"
+   :handler (fn [_resources data]
+              (let [{:keys [name email]} (:profile data)
+                    orders (:orders data)
+                    total  (reduce + 0 (map :amount orders))]
+                (assoc data
+                       :http-response
+                       {:status 200
+                        :body   {:user    {:name name :email email}
+                                 :orders  orders
+                                 :summary {:order-count (count orders)
+                                           :total       total}}})))})
+
 (defmethod cell/cell-spec :ui/render-user-list [_]
   {:id      :ui/render-user-list
    :doc     "Render the user list page"
