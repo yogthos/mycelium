@@ -116,18 +116,24 @@
                 error      (validate-output cell data transition)
                 ;; Extract duration-ms from the latest Maestro trace segment
                 duration-ms (some-> (:trace fsm-state) last :duration-ms)
+                ;; Extract join sub-traces if present
+                join-traces (:mycelium/join-traces data)
                 trace-entry (cond-> {:cell       (get state->names state-id)
                                      :cell-id    (:id cell)
                                      :transition transition
-                                     :data       (dissoc data :mycelium/trace)}
-                              duration-ms (assoc :duration-ms duration-ms)
-                              error       (assoc :error error))]
+                                     :data       (dissoc data :mycelium/trace :mycelium/join-traces)}
+                              duration-ms   (assoc :duration-ms duration-ms)
+                              join-traces   (assoc :join-traces join-traces)
+                              error         (assoc :error error))]
             (if error
               (-> fsm-state
                   (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
+                  (update :data dissoc :mycelium/join-traces)
                   (assoc :current-state-id ::fsm/error)
                   (assoc-in [:data :mycelium/schema-error] error))
-              (update-in fsm-state [:data :mycelium/trace] (fnil conj []) trace-entry)))
+              (-> fsm-state
+                  (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
+                  (update :data dissoc :mycelium/join-traces))))
           fsm-state)))))
 
 (defn wrap-async-callback

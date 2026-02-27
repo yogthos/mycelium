@@ -27,7 +27,7 @@
 
 (defn validate-manifest
   "Validates a manifest structure. Returns the manifest if valid, throws otherwise."
-  [{:keys [id cells edges dispatches] :as manifest}]
+  [{:keys [id cells edges dispatches joins] :as manifest}]
   (when-not id
     (throw (ex-info "Manifest missing :id" {:manifest manifest})))
   (when-not cells
@@ -37,15 +37,22 @@
   ;; Validate each cell definition
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
-  ;; Validate edge targets, edges exist for all cells, dispatch coverage, reachability
-  (let [cell-names (set (keys cells))]
-    (v/validate-edge-targets! edges cell-names)
+  ;; Determine join members — cells consumed by joins don't need edges
+  (let [join-members (set (mapcat :cells (vals (or joins {}))))
+        cell-names   (set (keys cells))
+        join-names   (set (keys (or joins {})))
+        ;; Valid edge targets include non-member cells + join names
+        edge-cell-names (clojure.set/difference cell-names join-members)
+        valid-names     (clojure.set/union edge-cell-names join-names)]
+    (v/validate-edge-targets! edges valid-names)
+    ;; Only require edge entries for non-join-member cells
     (doseq [[cell-name _] cells]
-      (when-not (get edges cell-name)
+      (when-not (or (get edges cell-name)
+                    (contains? join-members cell-name))
         (throw (ex-info (str "Cell " cell-name " has no edges defined")
                         {:cell-name cell-name}))))
     (v/validate-dispatch-coverage! edges (or dispatches {}))
-    (v/validate-reachability! edges cell-names))
+    (v/validate-reachability! edges valid-names))
   manifest)
 
 ;; ===== Manifest loading =====
@@ -171,4 +178,5 @@
                        cells)]
     (cond-> {:cells cell-ids
              :edges edges}
-      dispatches (assoc :dispatches dispatches))))
+      dispatches (assoc :dispatches dispatches)
+      (:joins manifest) (assoc :joins (:joins manifest)))))
