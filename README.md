@@ -10,6 +10,8 @@ Mycelium structures applications as directed graphs of pure data transformations
 
 LLM coding agents fail at large codebases for the same reason humans do: unbounded context. Mycelium solves this by constraining each component to a fixed scope with an explicit contract. An agent implementing a cell never needs to see the rest of the application — just its schema and test harness.
 
+See [Managing Complexity with Mycelium](https://yogthos.net/posts/2026-02-25-ai-at-scale.html) for a longer rationale.
+
 ## Quick Start
 
 ```clojure
