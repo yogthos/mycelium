@@ -15,12 +15,12 @@ LLM coding agents fail at large codebases for the same reason humans do: unbound
 ```clojure
 ;; deps.edn
 {:deps {io.github.yogthos/mycelium {:git/url "https://github.com/yogthos/mycelium"
-                                     :git/sha "..."}}}
+                                    :git/sha "..."}}}
 ```
 
 ### Define Cells
 
-A cell is a pure function with schema contracts, registered via `defmethod`:
+A cell is a function with schema contracts, registered via `defmethod`:
 
 ```clojure
 (require '[mycelium.cell :as cell])
@@ -40,8 +40,10 @@ A cell is a pure function with schema contracts, registered via `defmethod`:
                  :output [:map [:result :int]]}})
 ```
 
+Each cell is a miniature program akin to a microservice. The purpose of a cell is to encapsulate the implementation details for a particular step in the application workflow. For example, a cell handling authentication might check the database for the user account, compare it with the provided credentials, and then return an updated state with additional keys indicating the result of the operation.
+
 Cells must:
-- Return the data map with any computed values added
+- Return the data map (application state) with any computed values added
 - Produce output satisfying their `:output` schema on every path
 - Only use resources passed via the first argument
 
@@ -418,13 +420,13 @@ mycelium/
 ├── src/mycelium/
 │   ├── cell.clj          ;; Cell registry (multimethod-based)
 │   ├── schema.clj        ;; Malli pre/post interceptors
-│   ├── workflow.clj       ;; DSL → Maestro compiler
-│   ├── compose.clj        ;; Hierarchical workflow nesting
-│   ├── manifest.clj       ;; EDN manifest loading, cell briefs
-│   ├── dev.clj            ;; Testing harness, visualization
-│   ├── orchestrate.clj    ;; Agent orchestration helpers
-│   └── core.clj           ;; Public API
-└── test/mycelium/         ;; 115 tests, 254 assertions
+│   ├── workflow.clj      ;; DSL → Maestro compiler
+│   ├── compose.clj       ;; Hierarchical workflow nesting
+│   ├── manifest.clj      ;; EDN manifest loading, cell briefs
+│   ├── dev.clj           ;; Testing harness, visualization
+│   ├── orchestrate.clj   ;; Agent orchestration helpers
+│   └── core.clj          ;; Public API
+└── test/mycelium/        ;; tests and assertions
 ```
 
 ## License
