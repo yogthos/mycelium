@@ -114,11 +114,14 @@
                                      [state-id (:current-state-id fsm-state)]))
                 data       (:data fsm-state)
                 error      (validate-output cell data transition)
+                ;; Extract duration-ms from the latest Maestro trace segment
+                duration-ms (some-> (:trace fsm-state) last :duration-ms)
                 trace-entry (cond-> {:cell       (get state->names state-id)
                                      :cell-id    (:id cell)
                                      :transition transition
                                      :data       (dissoc data :mycelium/trace)}
-                              error (assoc :error error))]
+                              duration-ms (assoc :duration-ms duration-ms)
+                              error       (assoc :error error))]
             (if error
               (-> fsm-state
                   (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)

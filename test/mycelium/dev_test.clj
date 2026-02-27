@@ -1,7 +1,9 @@
 (ns mycelium.dev-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [mycelium.cell :as cell]
-            [mycelium.dev :as dev]))
+            [mycelium.dev :as dev]
+            [mycelium.workflow :as wf]
+            [maestro.core :as fsm]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
@@ -198,3 +200,88 @@
       ;; The :again→:start cycle is detected and pruned
       (is (= 1 (count paths)))
       (is (= :done (:transition (first (first paths))))))))
+
+;; ===== analyze-workflow =====
+
+(deftest analyze-workflow-healthy-test
+  (testing "analyze-workflow reports healthy workflow with no issues"
+    (defmethod cell/cell-spec :dev/analyze-a [_]
+      {:id      :dev/analyze-a
+       :handler (fn [_ data] (assoc data :a 1))
+       :schema  {:input [:map] :output [:map [:a :int]]}})
+    (defmethod cell/cell-spec :dev/analyze-b [_]
+      {:id      :dev/analyze-b
+       :handler (fn [_ data] (assoc data :b 2))
+       :schema  {:input [:map [:a :int]] :output [:map [:b :int]]}})
+    (let [analysis (dev/analyze-workflow
+                    {:cells {:start :dev/analyze-a
+                             :step2 :dev/analyze-b}
+                     :edges {:start {:next :step2}
+                             :step2 {:done :end}}
+                     :dispatches {:start [[:next (constantly true)]]
+                                  :step2 [[:done (constantly true)]]}})]
+      (is (contains? (:reachable analysis) :start))
+      (is (contains? (:reachable analysis) :step2))
+      (is (empty? (:unreachable analysis)))
+      (is (empty? (:no-path-to-end analysis)))
+      (is (empty? (:cycles analysis))))))
+
+(deftest analyze-workflow-detects-cycles-test
+  (testing "analyze-workflow detects cycles in the workflow graph"
+    (defmethod cell/cell-spec :dev/cycle-cell [_]
+      {:id      :dev/cycle-cell
+       :handler (fn [_ data] (update data :count (fnil inc 0)))
+       :schema  {:input [:map] :output [:map [:count :int]]}})
+    (let [analysis (dev/analyze-workflow
+                    {:cells {:start :dev/cycle-cell}
+                     :edges {:start {:again :start, :done :end}}
+                     :dispatches {:start [[:again (fn [d] (< (:count d 0) 3))]
+                                          [:done  (fn [d] (>= (:count d 0) 3))]]}})]
+      ;; The self-loop :start → :start is a cycle
+      (is (seq (:cycles analysis))))))
+
+(deftest analyze-workflow-multi-node-cycle-test
+  (testing "analyze-workflow detects multi-node cycles (A→B→A)"
+    (defmethod cell/cell-spec :dev/cycle-a [_]
+      {:id      :dev/cycle-a
+       :handler (fn [_ data] (update data :n (fnil inc 0)))
+       :schema  {:input [:map] :output [:map [:n :int]]}})
+    (defmethod cell/cell-spec :dev/cycle-b [_]
+      {:id      :dev/cycle-b
+       :handler (fn [_ data] (update data :n inc))
+       :schema  {:input [:map [:n :int]] :output [:map [:n :int]]}})
+    (let [analysis (dev/analyze-workflow
+                    {:cells {:start  :dev/cycle-a
+                             :step-b :dev/cycle-b}
+                     :edges {:start  {:next :step-b}
+                             :step-b {:loop :start, :done :end}}
+                     :dispatches {:start  [[:next (constantly true)]]
+                                  :step-b [[:loop (fn [d] (< (:n d) 4))]
+                                            [:done (fn [d] (>= (:n d) 4))]]}})]
+      ;; Multi-node cycle: start → step-b → start
+      (is (seq (:cycles analysis)))
+      ;; Cycle entries should use cell names, not resolved state IDs
+      (let [cycle-names (set (flatten (:cycles analysis)))]
+        (is (contains? cycle-names :start))
+        (is (contains? cycle-names :step-b))))))
+
+(deftest analyze-workflow-no-path-to-end-test
+  (testing "analyze-workflow reports states with no path to end"
+    (defmethod cell/cell-spec :dev/npe-router [_]
+      {:id      :dev/npe-router
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :dev/npe-dead [_]
+      {:id      :dev/npe-dead
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (let [analysis (dev/analyze-workflow
+                    {:cells {:start   :dev/npe-router
+                             :dead-end :dev/npe-dead}
+                     :edges {:start    {:ok :dead-end, :skip :end}
+                             :dead-end :halt}
+                     :dispatches {:start [[:ok (fn [_] true)]
+                                           [:skip (fn [_] false)]]}})]
+      (is (contains? (:no-path-to-end analysis) :dead-end))
+      ;; :start does have a path to end via :skip
+      (is (not (contains? (:no-path-to-end analysis) :start))))))

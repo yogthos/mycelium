@@ -247,5 +247,11 @@
                             (when-let [on-end (:on-end opts)]
                               {::fsm/end {:handler on-end}}))
                :opts {:pre  pre
-                      :post post}}]
+                      :post post}}
+         ;; Static analysis: catch structural issues Maestro can detect
+         analysis (fsm/analyze spec)]
+     (when (seq (:no-path-to-end analysis))
+       (let [names (mapv #(get state->names % %) (:no-path-to-end analysis))]
+         (throw (ex-info (str "States with no path to end: " names)
+                         {:no-path-to-end names :analysis analysis}))))
      (fsm/compile spec))))

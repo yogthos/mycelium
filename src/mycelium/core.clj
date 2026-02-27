@@ -61,6 +61,18 @@
    (let [compiled (compile-workflow workflow-def opts)]
      (fsm/run compiled resources {:data initial-data}))))
 
+(defn run-workflow-async
+  "Like run-workflow but returns a future. Deref to get the final data map."
+  ([workflow-def]
+   (run-workflow-async workflow-def {} {} {}))
+  ([workflow-def resources]
+   (run-workflow-async workflow-def resources {} {}))
+  ([workflow-def resources initial-data]
+   (run-workflow-async workflow-def resources initial-data {}))
+  ([workflow-def resources initial-data opts]
+   (let [compiled (compile-workflow workflow-def opts)]
+     (fsm/run-async compiled resources {:data initial-data}))))
+
 ;; --- Dev tools ---
 
 (def test-transitions
@@ -72,3 +84,8 @@
   "Enumerates all paths from :start to terminal states.
    See mycelium.dev/enumerate-paths."
   dev/enumerate-paths)
+
+(def analyze-workflow
+  "Runs Maestro's static analysis on a workflow definition.
+   See mycelium.dev/analyze-workflow."
+  dev/analyze-workflow)
