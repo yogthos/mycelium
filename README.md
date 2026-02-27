@@ -177,17 +177,115 @@ start → validate-session → fetch-profile → fetch-orders → render-summary
 - **Multi-source inputs**: `:render-summary` needs both `:profile` (from `:fetch-profile`) and `:orders` (from `:fetch-orders`). Both are present in the accumulated map.
 - **Schema chain validation**: `compile-workflow` walks each path from `:start`, accumulating declared output keys at every edge. By the time it reaches `:render-summary`, the available key set includes outputs from all prior cells — so both `:profile` and `:orders` are in scope.
 
-This model handles linear and branching (tree) topologies. For true parallel fan-out/fan-in (diamond shapes where cells execute concurrently and merge results), you would need an orchestration layer — see `orchestrate.clj` for that pattern.
+This model handles linear and branching (tree) topologies naturally. For parallel fan-out/fan-in (diamond shapes where cells execute concurrently and merge results), use join nodes — described next.
+
+## Join Nodes (Fork-Join Parallel Execution)
+
+When multiple independent cells can run concurrently, declare a **join node** that groups them together:
+
+```clojure
+{:cells {:start          :auth/validate-session
+         :fetch-profile  :user/fetch-profile     ;; join member
+         :fetch-orders   :user/fetch-orders      ;; join member
+         :render-summary :ui/render-summary
+         :render-error   :ui/render-error}
+
+ :joins {:fetch-data {:cells    [:fetch-profile :fetch-orders]
+                      :strategy :parallel}}       ;; or :sequential
+
+ :edges {:start          {:authorized :fetch-data, :unauthorized :render-error}
+         :fetch-data     {:done :render-summary, :failure :render-error}
+         :render-summary {:done :end}
+         :render-error   {:done :end}}
+
+ :dispatches {:start [[:authorized   (fn [d] (:session-valid d))]
+                       [:unauthorized (fn [d] (not (:session-valid d)))]]
+              :render-summary [[:done (constantly true)]]
+              :render-error   [[:done (constantly true)]]}}
+```
+
+Key concepts:
+
+- **Join members** (`:fetch-profile`, `:fetch-orders`) exist in `:cells` but have **no entries in `:edges`** — they are consumed by the join
+- The **join name** (`:fetch-data`) appears in `:edges` like a regular cell
+- Each member receives the **same input snapshot** — parallel and sequential produce identical results
+- The join provides **default dispatches** (`:done` / `:failure`) based on whether any branch threw an exception
+
+### Snapshot Semantics
+
+Each branch in a join receives the same data snapshot from upstream. Branches cannot see each other's outputs. After all branches complete, their results are merged into the data map.
+
+### Output Key Conflict Detection
+
+At compile time, Mycelium collects output schema keys from all join members. If any key appears in multiple cells:
+
+- **No `:merge-fn`** → compile-time error listing the conflicting keys and which cells produce them
+- **`:merge-fn` provided** → allowed, the user handles conflict resolution
+
+```clojure
+;; Both cells produce :items — requires :merge-fn
+:joins {:gather {:cells    [:source-a :source-b]
+                 :merge-fn (fn [data results]
+                             (assoc data :items
+                                    (vec (mapcat :items results))))}}
+```
+
+The `:merge-fn` receives the original upstream data and a vector of result maps from each branch.
+
+### Error Handling
+
+All branches run to completion (no early cancellation). Errors are collected in `:mycelium/join-error` on the data map. The join's default dispatches route to `:failure` when errors are present:
+
+```clojure
+;; Join edges should include a :failure route
+:edges {:fetch-data {:done :render-summary, :failure :render-error}}
+```
+
+### Async Cells in Joins
+
+Async cells (`:async? true`) work within joins. The join handler wraps them with promise-based invocation, so both sync and async cells execute uniformly.
+
+### Schema Chain Integration
+
+The schema chain validator handles joins by:
+1. Validating each member cell's input keys are available from upstream
+2. Accumulating the **union** of all member cells' output keys as available downstream
+
+This means a cell after the join can require keys from any member — the validator knows the join produces the union of all member outputs.
+
+### Join Trace
+
+Each join produces a single trace entry with a `:join-traces` vector containing per-member timing and status:
+
+```clojure
+{:cell :fetch-data
+ :cell-id :mycelium.join/fetch-data
+ :transition :done
+ :join-traces [{:cell :fetch-profile, :cell-id :user/fetch-profile,
+                :duration-ms 12.3, :status :ok}
+               {:cell :fetch-orders, :cell-id :user/fetch-orders,
+                :duration-ms 8.7, :status :ok}]}
+```
+
+### Join Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `:cells` | (required) | Vector of cell names to run in the join |
+| `:strategy` | `:parallel` | `:parallel` or `:sequential` |
+| `:merge-fn` | `nil` | `(fn [data results])` — custom result merging |
+| `:on-failure` | `nil` | Cell name to route to on failure (informational) |
 
 ## Compile-Time Validation
 
 `compile-workflow` validates before any code runs:
 
 - **Cell existence** — all referenced cells must be registered
-- **Edge targets** — all targets must point to valid cells or `:end`/`:error`/`:halt`
-- **Reachability** — every cell must be reachable from `:start`
+- **Edge targets** — all targets must point to valid cells, join names, or `:end`/`:error`/`:halt`
+- **Reachability** — every cell and join must be reachable from `:start`
 - **Dispatch coverage** — every edge label must have a corresponding dispatch predicate, and vice versa
-- **Schema chain** — each cell's input keys must be available from upstream outputs
+- **Schema chain** — each cell's input keys must be available from upstream outputs (join-aware: validates member inputs and accumulates union of member outputs)
+- **Join validation** — member cells exist, no name collisions with cells, members have no edges, output keys are disjoint (or `:merge-fn` provided), strategy is valid
 
 ```
 Schema chain error: :user/fetch-profile at :fetch-profile requires keys #{:user-id}
@@ -230,6 +328,7 @@ Each trace entry contains:
 | `:transition` | Dispatch label taken (`nil` for unconditional edges) |
 | `:data` | Data snapshot after the handler ran |
 | `:error` | Schema error details (only present on validation failure) |
+| `:join-traces` | Per-member timing/status (only present for join nodes) |
 
 Data snapshots exclude `:mycelium/trace` itself to avoid recursive nesting.
 
@@ -321,6 +420,21 @@ Define workflows as pure data in `.edn` files:
                          [:failure (fn [data] (not (:user-id data)))]]
               :validate [[:authorized   (fn [data] (:session-valid data))]
                          [:unauthorized (fn [data] (not (:session-valid data)))]]}}
+```
+
+Manifests can also include `:joins` — they are passed through to the workflow definition unchanged:
+
+```clojure
+{:id :order-summary
+ :cells {:start         {:id :auth/extract-session ...}
+         :fetch-profile {:id :user/fetch-profile ...}
+         :fetch-orders  {:id :user/fetch-orders ...}
+         :render-summary {:id :ui/render-summary ...}}
+ :joins {:fetch-data {:cells    [:fetch-profile :fetch-orders]
+                      :strategy :parallel}}
+ :edges {:start      {:success :fetch-data}
+         :fetch-data {:done :render-summary, :failure :error}
+         ...}}
 ```
 
 Dispatch predicates in EDN are `(fn ...)` forms compiled by Maestro's built-in SCI evaluator.

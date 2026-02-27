@@ -63,22 +63,29 @@ graph LR
     err -->|done| stop
 ```
 
-### JSON API — Order Summary (multi-source inputs)
+### JSON API — Order Summary (join node)
 
 ```mermaid
 graph LR
     start[extract-session] -->|success| validate[validate-session]
     start -->|failure| err[render-error]
-    validate -->|authorized| fetch[fetch-profile]
+    validate -->|authorized| fetch_data{fetch-data join}
     validate -->|unauthorized| err
-    fetch -->|found| orders[fetch-orders]
-    fetch -->|not-found| err
-    orders -->|done| summary[render-summary]
+    fetch_data -.-> fp[fetch-profile]
+    fetch_data -.-> fo[fetch-orders]
+    fetch_data -->|done| summary[render-summary]
+    fetch_data -->|failure| err
     summary -->|done| stop((end))
     err -->|done| stop
+
+    style fetch_data fill:#e8f4f8,stroke:#2196F3,stroke-dasharray: 5 5
+    style fp fill:#fffde7
+    style fo fill:#fffde7
 ```
 
-This workflow exercises **multi-source cell inputs**: `:render-summary` needs `:profile` from `:fetch-profile` AND `:orders` from `:fetch-orders` — data produced by two different cells. It works because Mycelium passes an accumulating data map where every cell sees all keys from all prior cells in the path, not just its immediate predecessor.
+This workflow uses a **join node** (`:fetch-data`) to run `:fetch-profile` and `:fetch-orders` in parallel. Both members receive the same input snapshot (containing `:user-id` from `:validate-session`) and their outputs are merged into a single data map. `:render-summary` then sees both `:profile` and `:orders` — the join guarantees disjoint output keys at compile time.
+
+The join replaces the previous linear chain with explicit parallel execution, compile-time conflict detection, and snapshot semantics that ensure deterministic results regardless of execution order.
 
 Each box is a **cell** — an isolated unit with a defined handler and input/output schema. The manifests (`resources/workflows/*.edn`) are the single source of truth for schemas, edges, and dispatch predicates.
 
