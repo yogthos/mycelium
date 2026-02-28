@@ -8,6 +8,7 @@
    :schema   {:input  [:map]
               :output [:map
                         [:html :string]]}
+   :on-error nil
    :requires []}}
 
  :edges

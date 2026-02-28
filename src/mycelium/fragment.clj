@@ -1,7 +1,9 @@
 (ns mycelium.fragment
   "Workflow fragment loading, validation, and expansion.
    Fragments are reusable sub-workflows that can be embedded into host manifests."
-  (:require [clojure.set :as set]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [clojure.set :as set]
             [mycelium.validation :as v]))
 
 ;; ===== Fragment validation =====
@@ -106,10 +108,18 @@
                             {:fragment-id (:id fragment) :collisions collisions})))
         ;; Exit keyword mapping
         exit-mapping exits
-        ;; Rename cells
+        ;; Rename cells and resolve :on-error :_exit/* references
         expanded-cells (into {}
                              (map (fn [[cell-name cell-def]]
-                                    [(rename cell-name) cell-def]))
+                                    (let [resolved-def
+                                          (if-let [on-err (:on-error cell-def)]
+                                            (if (and (keyword? on-err)
+                                                     (= "_exit" (namespace on-err)))
+                                              (assoc cell-def :on-error
+                                                     (get exit-mapping (keyword (name on-err))))
+                                              (assoc cell-def :on-error (rename on-err)))
+                                            cell-def)]
+                                      [(rename cell-name) resolved-def])))
                              cells)
         ;; Rename and replace edges
         expanded-edges (into {}
@@ -138,14 +148,32 @@
      :edges      expanded-edges
      :dispatches expanded-dispatches}))
 
+(defn load-fragment
+  "Loads a fragment from a resource path. Returns the parsed EDN."
+  [path]
+  (if-let [resource (io/resource path)]
+    (edn/read-string (slurp resource))
+    (throw (ex-info (str "Fragment resource not found: " path) {:path path}))))
+
+(defn- resolve-fragment
+  "Resolves fragment data from a mapping. Supports :fragment (inline) or :ref (file path)."
+  [frag-mapping]
+  (or (:fragment frag-mapping)
+      (when-let [ref (:ref frag-mapping)]
+        (load-fragment ref))
+      (throw (ex-info "Fragment mapping must have :fragment or :ref"
+                      {:mapping frag-mapping}))))
+
 (defn expand-all-fragments
   "Expands all :fragments in a manifest, merging them into the manifest's cells/edges/dispatches.
+   Each fragment mapping may specify :fragment (inline data) or :ref (resource path).
    Returns the manifest with fragments expanded and :fragments key removed."
   [{:keys [fragments cells edges dispatches] :as manifest}]
   (if (empty? fragments)
     manifest
     (let [result (reduce (fn [acc [_frag-name frag-mapping]]
-                           (let [{:keys [fragment as exits]} frag-mapping
+                           (let [fragment (resolve-fragment frag-mapping)
+                                 {:keys [as exits]} frag-mapping
                                  expansion (expand-fragment fragment
                                                            {:as as :exits exits}
                                                            (:cells acc))]

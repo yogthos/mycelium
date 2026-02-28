@@ -1,53 +1,16 @@
 {:id :user-onboarding
- :doc "Handles user authentication and profile retrieval"
+ :doc "Handles user authentication and profile retrieval (JSON API)"
+
+ :input-schema [:map [:http-request [:map [:headers map?] [:body map?]]]]
+
+ :fragments
+ {:auth {:ref   "fragments/parse-auth.edn"
+         :as    :start
+         :exits {:success :render-home
+                 :failure :render-error}}}
 
  :cells
- {:start
-  {:id       :auth/parse-request
-   :doc      "Extract and validate credentials from the HTTP request"
-   :schema   {:input  [:map
-                        [:http-request [:map
-                          [:headers map?]
-                          [:body map?]]]]
-              :output {:success [:map
-                                  [:user-id :string]
-                                  [:auth-token :string]]
-                       :failure [:map
-                                  [:error-type :keyword]
-                                  [:error-message :string]]}}
-   :requires []}
-
-  :validate-session
-  {:id       :auth/validate-session
-   :doc      "Check credentials against the session store"
-   :schema   {:input  [:map
-                        [:user-id :string]
-                        [:auth-token :string]]
-              :output {:authorized   [:map
-                                       [:session-valid :boolean]
-                                       [:user-id :string]]
-                       :unauthorized [:map
-                                       [:session-valid :boolean]
-                                       [:error-type :keyword]
-                                       [:error-message :string]]}}
-   :requires [:db]}
-
-  :fetch-profile
-  {:id       :user/fetch-profile
-   :doc      "Fetch user profile from database"
-   :schema   {:input  [:map
-                        [:user-id :string]
-                        [:session-valid :boolean]]
-              :output {:found     [:map
-                                    [:profile [:map
-                                      [:name :string]
-                                      [:email :string]]]]
-                       :not-found [:map
-                                    [:error-type :keyword]
-                                    [:error-message :string]]}}
-   :requires [:db]}
-
-  :render-home
+ {:render-home
   {:id       :ui/render-home
    :doc      "Render the home page response"
    :schema   {:input  [:map
@@ -58,6 +21,7 @@
                         [:http-response [:map
                           [:status :int]
                           [:body map?]]]]}
+   :on-error :render-error
    :requires []}
 
   :render-error
@@ -67,24 +31,13 @@
               :output [:map
                         [:html :string]
                         [:error-status :int]]}
+   :on-error nil
    :requires []}}
 
  :edges
- {:start            {:success :validate-session
-                     :failure :render-error}
-  :validate-session {:authorized   :fetch-profile
-                     :unauthorized :render-error}
-  :fetch-profile    {:found     :render-home
-                     :not-found :render-error}
-  :render-home      {:done :end}
+ {:render-home      {:done :end}
   :render-error     {:done :end}}
 
  :dispatches
- {:start            [[:success (fn [data] (:auth-token data))]
-                     [:failure (fn [data] (:error-type data))]]
-  :validate-session [[:authorized   (fn [data] (:session-valid data))]
-                     [:unauthorized (fn [data] (not (:session-valid data)))]]
-  :fetch-profile    [[:found     (fn [data] (:profile data))]
-                     [:not-found (fn [data] (:error-type data))]]
-  :render-home      [[:done (fn [_] true)]]
+ {:render-home      [[:done (fn [_] true)]]
   :render-error     [[:done (fn [_] true)]]}}

@@ -5,17 +5,16 @@
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
-;; ===== 1. Cell without :on-error in strict mode → validation error =====
+;; ===== 1. Cell without :on-error in strict mode (default) → validation error =====
 
 (deftest missing-on-error-strict-test
-  (testing "Cell without :on-error in strict mode fails validation"
+  (testing "Cell without :on-error fails validation by default (strict is default)"
     (is (thrown-with-msg? Exception #"on-error"
           (manifest/validate-manifest
            {:id :test/strict-wf
             :cells {:start {:id     :test/strict-cell
                             :schema {:input [:map] :output [:map]}}}
-            :edges {:start :end}}
-           {:strict? true})))))
+            :edges {:start :end}})))))
 
 ;; ===== 2. Cell with :on-error nil → passes validation =====
 
@@ -63,15 +62,16 @@
             :edges {:start :end}}
            {:strict? true})))))
 
-;; ===== 5. Default non-strict mode: missing :on-error is a warning, not error =====
+;; ===== 5. Explicit non-strict mode: missing :on-error is allowed =====
 
 (deftest non-strict-missing-on-error-warns-test
-  (testing "Non-strict mode: missing :on-error does not throw (backwards compat)"
+  (testing "Non-strict mode: missing :on-error does not throw (legacy compat)"
     (let [result (manifest/validate-manifest
                   {:id :test/non-strict-wf
                    :cells {:start {:id     :test/ns-cell
                                    :schema {:input [:map] :output [:map]}}}
-                   :edges {:start :end}})]
+                   :edges {:start :end}}
+                  {:strict? false})]
       (is (= :test/non-strict-wf (:id result))))))
 
 ;; ===== 6. Non-strict mode with invalid :on-error target still throws =====

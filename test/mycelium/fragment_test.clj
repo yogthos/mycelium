@@ -95,7 +95,12 @@
       (is (contains? (:cells result) :validate-session))
       ;; Cell IDs are preserved
       (is (= :auth/extract-cookie-session
-             (get-in result [:cells :start :id]))))))
+             (get-in result [:cells :start :id])))
+      ;; :on-error :_exit/failure resolved to host target
+      (is (= :render-error
+             (get-in result [:cells :start :on-error])))
+      (is (= :render-error
+             (get-in result [:cells :validate-session :on-error]))))))
 
 ;; ===== 6. Expand fragment: :_exit/* replaced with host targets =====
 

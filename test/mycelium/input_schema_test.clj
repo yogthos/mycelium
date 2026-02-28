@@ -116,7 +116,8 @@
     (let [m {:id :test/input-schema-wf
              :cells {:start {:id :input-schema/m-cell
                               :schema {:input [:map [:x :int]]
-                                       :output [:map [:y :int]]}}}
+                                       :output [:map [:y :int]]}
+                              :on-error nil}}
              :edges {:start {:done :end}}
              :dispatches {:start [[:done (constantly true)]]}
              :input-schema [:map [:x :int]]}
@@ -131,6 +132,7 @@
           (manifest/validate-manifest
            {:id :test/bad-input-schema
             :cells {:start {:id :test/cell
-                             :schema {:input [:map] :output [:map]}}}
+                             :schema {:input [:map] :output [:map]}
+                             :on-error nil}}
             :edges {:start :end}
             :input-schema [:not-a-real-type]})))))

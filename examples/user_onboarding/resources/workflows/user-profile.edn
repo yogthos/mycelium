@@ -1,34 +1,16 @@
 {:id :user-profile
  :doc "Authenticate, fetch a single user by ID, and render their profile page"
 
+ :input-schema [:map [:http-request [:map]]]
+
+ :fragments
+ {:auth {:ref   "fragments/cookie-auth.edn"
+         :as    :start
+         :exits {:success :fetch-profile-by-id
+                 :failure :render-error}}}
+
  :cells
- {:start
-  {:id       :auth/extract-cookie-session
-   :doc      "Extract auth token from cookie or query parameters"
-   :schema   {:input  [:map
-                        [:http-request [:map]]]
-              :output {:success [:map
-                                  [:auth-token :string]]
-                       :failure [:map
-                                  [:error-type :keyword]
-                                  [:error-message :string]]}}
-   :requires []}
-
-  :validate-session
-  {:id       :auth/validate-session
-   :doc      "Check credentials against the session store"
-   :schema   {:input  [:map
-                        [:auth-token :string]]
-              :output {:authorized   [:map
-                                       [:session-valid :boolean]
-                                       [:user-id :string]]
-                       :unauthorized [:map
-                                       [:session-valid :boolean]
-                                       [:error-type :keyword]
-                                       [:error-message :string]]}}
-   :requires [:db]}
-
-  :fetch-profile-by-id
+ {:fetch-profile-by-id
   {:id       :user/fetch-profile-by-id
    :doc      "Extract user-id from path params and fetch profile"
    :schema   {:input  [:map
@@ -40,6 +22,7 @@
                        :not-found [:map
                                     [:error-type :keyword]
                                     [:error-message :string]]}}
+   :on-error :render-error
    :requires [:db]}
 
   :render-profile
@@ -52,6 +35,7 @@
                           [:email :string]]]]
               :output [:map
                         [:html :string]]}
+   :on-error :render-error
    :requires []}
 
   :render-error
@@ -61,24 +45,17 @@
               :output [:map
                         [:html :string]
                         [:error-status :int]]}
+   :on-error nil
    :requires []}}
 
  :edges
- {:start              {:success :validate-session
-                       :failure :render-error}
-  :validate-session   {:authorized   :fetch-profile-by-id
-                       :unauthorized :render-error}
-  :fetch-profile-by-id {:found     :render-profile
+ {:fetch-profile-by-id {:found     :render-profile
                          :not-found :render-error}
-  :render-profile     {:done :end}
-  :render-error       {:done :end}}
+  :render-profile      {:done :end}
+  :render-error        {:done :end}}
 
  :dispatches
- {:start              [[:success (fn [data] (:auth-token data))]
-                       [:failure (fn [data] (:error-type data))]]
-  :validate-session   [[:authorized   (fn [data] (:session-valid data))]
-                       [:unauthorized (fn [data] (not (:session-valid data)))]]
-  :fetch-profile-by-id [[:found     (fn [data] (:profile data))]
+ {:fetch-profile-by-id [[:found     (fn [data] (:profile data))]
                          [:not-found (fn [data] (:error-type data))]]
-  :render-profile     [[:done (fn [_] true)]]
-  :render-error       [[:done (fn [_] true)]]}}
+  :render-profile      [[:done (fn [_] true)]]
+  :render-error        [[:done (fn [_] true)]]}}

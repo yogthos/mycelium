@@ -51,8 +51,9 @@
 (defn validate-manifest
   "Validates a manifest structure. Returns the manifest if valid, throws otherwise.
    Optional opts map:
-     :strict? — if true, requires :on-error on every cell (default false)"
-  ([manifest] (validate-manifest manifest {}))
+     :strict? — if true (default), requires :on-error on every cell.
+                Set to false to allow missing :on-error (legacy mode)."
+  ([manifest] (validate-manifest manifest {:strict? true}))
   ([{:keys [id cells edges dispatches joins] :as manifest} opts]
   (when-not id
     (throw (ex-info "Manifest missing :id" {:manifest manifest})))
@@ -115,11 +116,15 @@
 ;; ===== Manifest loading =====
 
 (defn load-manifest
-  "Loads and validates a manifest from an EDN file path."
+  "Loads and validates a manifest from an EDN file path.
+   If the manifest contains :fragments, expands them before validation."
   [path]
   (let [content (slurp path)
-        manifest (edn/read-string content)]
-    (validate-manifest manifest)))
+        manifest (edn/read-string content)
+        expanded (if (:fragments manifest)
+                   (expand-fragments manifest)
+                   manifest)]
+    (validate-manifest expanded)))
 
 ;; ===== Cell brief generation =====
 
