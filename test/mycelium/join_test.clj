@@ -2,8 +2,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [mycelium.cell :as cell]
             [mycelium.workflow :as wf]
-            [maestro.core :as fsm])
-  (:import [java.util.concurrent ExecutionException]))
+            [maestro.core :as fsm]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 

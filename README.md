@@ -275,6 +275,7 @@ Each join produces a single trace entry with a `:join-traces` vector containing 
 | `:strategy` | `:parallel` | `:parallel` or `:sequential` |
 | `:merge-fn` | `nil` | `(fn [data results])` — custom result merging |
 | `:on-failure` | `nil` | Cell name to route to on failure (informational) |
+| `:timeout-ms` | `30000` | Timeout in ms for async cell invocations within the join |
 
 ## Compile-Time Validation
 
@@ -285,7 +286,7 @@ Each join produces a single trace entry with a `:join-traces` vector containing 
 - **Reachability** — every cell and join must be reachable from `:start`
 - **Dispatch coverage** — every edge label must have a corresponding dispatch predicate, and vice versa
 - **Schema chain** — each cell's input keys must be available from upstream outputs (join-aware: validates member inputs and accumulates union of member outputs)
-- **Join validation** — member cells exist, no name collisions with cells, members have no edges, output keys are disjoint (or `:merge-fn` provided), strategy is valid
+- **Join validation** — member cells exist, no name collisions with cells, members have no edges, output keys are disjoint (or `:merge-fn` provided), strategy is valid, no cell appears in multiple joins
 
 ```
 Schema chain error: :user/fetch-profile at :fetch-profile requires keys #{:user-id}
