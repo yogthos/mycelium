@@ -174,3 +174,8 @@
   "Runs Maestro's static analysis on a workflow definition.
    See mycelium.dev/analyze-workflow."
   dev/analyze-workflow)
+
+(def infer-workflow-schema
+  "Walks a workflow and reports accumulated schema keys at each cell.
+   See mycelium.dev/infer-workflow-schema."
+  dev/infer-workflow-schema)

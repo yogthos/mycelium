@@ -67,6 +67,21 @@ Cells must:
 ;; => 20
 ```
 
+### Pipeline Shorthand
+
+For linear (unbranched) workflows, use `:pipeline` instead of wiring `:edges` and `:dispatches` by hand:
+
+```clojure
+(myc/run-workflow
+  {:cells    {:start :math/double
+              :add   :math/add-ten}
+   :pipeline [:start :add]}
+  {} {:x 5})
+;; Equivalent to {:edges {:start :add, :add :end}, :dispatches {}}
+```
+
+`:pipeline` expands each pair into an unconditional edge and appends `:end` after the last cell. It is mutually exclusive with `:edges`, `:dispatches`, and `:joins`. Works in both programmatic workflow definitions and manifests.
+
 ### Branching
 
 Edges map transition labels to targets. Dispatch predicates examine the data to determine which edge to take:
@@ -399,6 +414,19 @@ Workflows can be nested as cells in parent workflows:
 
 Child workflows produce `:success` or `:failure` based on whether `:mycelium/error` is present in the data. Composed cells carry `:default-dispatches` that `compile-workflow` uses as fallback when no explicit dispatches are provided for that position. Child execution traces are preserved at `:mycelium/child-trace`.
 
+### Output Schema Inference
+
+`workflow->cell` automatically infers the composed cell's output schema by walking the child workflow's edges to find cells that route to `:end` and collecting their declared output keys. This means the parent workflow's schema chain validator can see what a composed cell produces — no manual `set-cell-schema!` override needed.
+
+```clojure
+;; The child workflow's last cell declares [:map [:credit-score :int] [:risk-level :keyword]]
+;; workflow->cell infers this and produces a per-transition output schema:
+;;   {:success [:map [:credit-score :int] [:risk-level :keyword]]
+;;    :failure [:map [:mycelium/error :any]]}
+```
+
+If you pass a concrete `[:map ...]` vector as `:output` in the schema argument, it takes precedence over inference.
+
 ## Manifest System
 
 Define workflows as pure data in `.edn` files:
@@ -500,6 +528,32 @@ Convert to a compilable workflow (registers stub handlers for unimplemented cell
 ;; => {:found     {:pass? true, :matched-dispatch :found, :output {...}}
 ;;     :not-found {:pass? true, :matched-dispatch :not-found, :output {...}}}
 ```
+
+When a case omits `:dispatches`, `test-transitions` skips the dispatch check and tests output only. This is useful for cells without dispatch predicates:
+
+```clojure
+(dev/test-transitions :loan/classify-risk
+  {:low    {:input {:credit-score 750}}
+   :medium {:input {:credit-score 650}}
+   :high   {:input {:credit-score 500}}})
+;; => {:low {:pass? true, :output {:risk-level :low, ...}}, ...}
+```
+
+### Infer Workflow Schema
+
+See the accumulated data shape at each point in a workflow:
+
+```clojure
+(dev/infer-workflow-schema workflow-def)
+;; => {:start  {:available-before #{:x}
+;;              :adds #{:a-done}
+;;              :available-after #{:x :a-done}}
+;;     :step-b {:available-before #{:x :a-done}
+;;              :adds #{:b-done}
+;;              :available-after #{:x :a-done :b-done}}}
+```
+
+Also available as `myc/infer-workflow-schema`. Handles branching (union of all incoming paths), joins (union of member outputs), and per-transition output schemas.
 
 ### Enumerate Workflow Paths
 

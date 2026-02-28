@@ -1,6 +1,7 @@
 (ns mycelium.dev
   "Development utilities: cell testing, scaffolding, visualization."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
             [mycelium.cell :as cell]
@@ -64,11 +65,16 @@
 (defn test-transitions
   "Tests a cell across multiple dispatch paths.
    cases: {dispatch-label {:input ... :resources ... :dispatches ...}}
+   When a case provides :dispatches, :expected-dispatch is set to the label.
+   When no :dispatches, the cell is tested for output only (no dispatch check).
    Returns: {dispatch-label test-result}"
   [cell-id cases]
   (into {}
         (map (fn [[label opts]]
-               [label (test-cell cell-id (assoc opts :expected-dispatch label))]))
+               [label (test-cell cell-id
+                        (if (:dispatches opts)
+                          (assoc opts :expected-dispatch label)
+                          opts))]))
         cases))
 
 (defn enumerate-paths
@@ -275,3 +281,94 @@
      :unreachable    (set (map resolve-name (:unreachable analysis)))
      :no-path-to-end (set (map resolve-name (:no-path-to-end analysis)))
      :cycles         (mapv (fn [cycle] (mapv resolve-name cycle)) (:cycles analysis))}))
+
+(defn- get-map-keys
+  "Extracts top-level key names from a Malli :map schema. Returns #{} if not a :map schema."
+  [schema]
+  (if (and (vector? schema) (= :map (first schema)))
+    (set (keep (fn [entry]
+                 (when (vector? entry)
+                   (first entry)))
+               (rest schema)))
+    #{}))
+
+(defn- cell-output-keys
+  "Returns the union of all output keys for a cell across all transitions."
+  [cell-id]
+  (let [cell   (cell/get-cell cell-id)
+        output (when cell (get-in cell [:schema :output]))]
+    (cond
+      (nil? output)    #{}
+      (vector? output) (get-map-keys output)
+      (map? output)    (reduce (fn [acc [_ s]] (set/union acc (get-map-keys s))) #{} output)
+      :else            #{})))
+
+(defn- cell-input-keys
+  "Returns the set of input keys for a cell."
+  [cell-id]
+  (let [cell (cell/get-cell cell-id)]
+    (when cell
+      (get-map-keys (get-in cell [:schema :input])))))
+
+(defn- join-output-keys
+  "Returns the union of output keys from all member cells of a join."
+  [join-def cells-map]
+  (reduce (fn [acc member]
+            (let [cell-id (get cells-map member)]
+              (set/union acc (cell-output-keys cell-id))))
+          #{}
+          (:cells join-def)))
+
+(defn infer-workflow-schema
+  "Walks a workflow definition and returns a map showing the accumulated schema
+   at each cell. For each cell, reports:
+     :available-before — keys available when the cell starts
+     :adds            — keys this cell adds (output keys)
+     :available-after  — keys available after the cell completes
+
+   Handles branching by taking the union of available keys from all incoming paths.
+   Join nodes: union of all member output keys."
+  [{:keys [cells edges joins] :as _workflow-def}]
+  (let [joins-map (or joins {})
+        terminal? #{:end :error :halt}
+        ;; Accumulate per-cell info via BFS
+        result (atom {})
+        ;; Track best available-before per cell (union across all incoming edges)
+        available-before (atom {})
+        ;; Start cell's input keys are the initial set
+        start-cell-id (get cells :start)
+        start-input (or (cell-input-keys start-cell-id) #{})
+        queue (atom [[:start start-input]])]
+    (swap! available-before assoc :start start-input)
+    (loop []
+      (when (seq @queue)
+        (let [[cell-name avail] (first @queue)]
+          (swap! queue #(vec (rest %)))
+          (when-not (terminal? cell-name)
+            ;; Merge incoming available keys
+            (let [prev-avail (get @available-before cell-name #{})
+                  merged-avail (set/union prev-avail avail)]
+              (swap! available-before assoc cell-name merged-avail)
+              ;; Compute output keys
+              (let [adds (if-let [join-def (get joins-map cell-name)]
+                           (join-output-keys join-def cells)
+                           (let [cell-id (get cells cell-name)]
+                             (cell-output-keys cell-id)))
+                    after (set/union merged-avail adds)]
+                ;; Record if first visit or if available-before expanded
+                (let [prev-record (get @result cell-name)]
+                  (when (or (nil? prev-record)
+                            (not= merged-avail (:available-before prev-record)))
+                    (swap! result assoc cell-name
+                           {:available-before merged-avail
+                            :adds            adds
+                            :available-after  after})
+                    ;; Traverse edges
+                    (let [edge-def (get edges cell-name)]
+                      (if (keyword? edge-def)
+                        (swap! queue conj [edge-def after])
+                        (when (map? edge-def)
+                          (doseq [[_ target] edge-def]
+                            (swap! queue conj [target after])))))))))))
+        (recur)))
+    @result))
