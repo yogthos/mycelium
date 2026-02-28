@@ -1,0 +1,32 @@
+{:id :todo-add
+ :doc "Add a new todo, then fetch + render list"
+
+ :input-schema [:map [:http-request :map]]
+
+ :fragments
+ {:tail {:ref   "fragments/fetch-render-list.edn"
+         :as    :fetch-list
+         :exits {:done :end}}}
+
+ :cells
+ {:start
+  {:id       :request/parse-todo
+   :doc      "Parse request parameters"
+   :schema   {:input  [:map [:http-request :map]]
+              :output [:map [:title :string] [:filter :string]]}
+   :on-error nil
+   :requires []}
+
+  :create
+  {:id       :todo/create
+   :doc      "Create a new todo"
+   :schema   {:input  [:map [:title :string]]
+              :output [:map [:created-id :int]]}
+   :on-error nil
+   :requires [:db]}}
+
+ :edges
+ {:start  :create
+  :create :fetch-list}
+
+ :dispatches {}}

@@ -1,0 +1,32 @@
+{:id :todo-clear
+ :doc "Clear completed todos, then fetch + render list"
+
+ :input-schema [:map [:http-request :map]]
+
+ :fragments
+ {:tail {:ref   "fragments/fetch-render-list.edn"
+         :as    :fetch-list
+         :exits {:done :end}}}
+
+ :cells
+ {:start
+  {:id       :request/parse-todo
+   :doc      "Parse request parameters"
+   :schema   {:input  [:map [:http-request :map]]
+              :output [:map [:filter :string]]}
+   :on-error nil
+   :requires []}
+
+  :clear
+  {:id       :todo/clear-completed
+   :doc      "Delete all completed todos"
+   :schema   {:input  [:map]
+              :output [:map]}
+   :on-error nil
+   :requires [:db]}}
+
+ :edges
+ {:start :clear
+  :clear :fetch-list}
+
+ :dispatches {}}

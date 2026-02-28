@@ -1,0 +1,27 @@
+{:min-bb-version "0.8.156"
+ :deps  {failjure/failjure {:mvn/version "2.3.0"}}
+ :tasks {:requires ([babashka.fs :as fs]
+                    [babashka.tasks :refer [shell]])
+
+         run       {:doc  "starts the app"
+                    :task (if (fs/windows?)
+                            (clojure {:dir "."} "-M:dev")
+                            (shell {:dir "."} "clj -M:dev"))}
+
+         nrepl     {:doc  "starts the nREPL"
+                    :task (clojure {:dir "."} "-M:dev:nrepl")}
+
+         cider     {:doc  "starts the cider"
+                    :task (clojure {:dir "."} "-M:dev:cider")}
+
+         test      {:doc  "runs tests"
+                    :task (clojure {:dir "."} "-M:test")}
+
+         uberjar   {:doc  "builds the uberjar"
+                    :task (clojure {:dir "."} "-T:build all")}
+
+         format    {:doc  "Formats codebase"
+                    :task (try
+                            (shell {:dir "src"} "cljstyle fix")
+                            (catch Exception _
+                              (clojure {:dir "src"} "-M:dev -m cljstyle.main fix")))}}}
