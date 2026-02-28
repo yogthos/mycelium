@@ -1,0 +1,54 @@
+{:id :todo-page
+ :doc "Full page render: parse request, fetch todos + stats, render page"
+
+ :input-schema [:map [:http-request :map]]
+
+ :cells
+ {:start
+  {:id       :request/parse-todo
+   :doc      "Parse request parameters"
+   :schema   {:input  [:map [:http-request :map]]
+              :output [:map [:filter :string]]}
+   :on-error nil
+   :requires []}
+
+  :fetch-list
+  {:id       :todo/list
+   :doc      "Fetch filtered list of todos"
+   :schema   {:input  [:map [:filter :string]]
+              :output [:map [:todos [:vector :map]]]}
+   :on-error nil
+   :requires [:db]}
+
+  :fetch-stats
+  {:id       :todo/count-stats
+   :doc      "Fetch todo count statistics"
+   :schema   {:input  [:map]
+              :output [:map [:stats [:map
+                              [:active :int]
+                              [:completed :int]
+                              [:total :int]]]]}
+   :on-error nil
+   :requires [:db]}
+
+  :render-page
+  {:id       :ui/render-todo-page
+   :doc      "Render the full TodoMVC page"
+   :schema   {:input  [:map
+                [:todos [:vector :map]]
+                [:stats [:map [:active :int] [:completed :int] [:total :int]]]
+                [:filter :string]]
+              :output [:map [:html :string]]}
+   :on-error nil
+   :requires []}}
+
+ :joins
+ {:fetch-data {:cells    [:fetch-list :fetch-stats]
+               :strategy :parallel}}
+
+ :edges
+ {:start      :fetch-data
+  :fetch-data {:done :render-page}
+  :render-page :end}
+
+ :dispatches {}}

@@ -1,0 +1,43 @@
+{:id    :fetch-render-list
+ :doc   "Fetch filtered todos + stats, render the list fragment"
+
+ :entry :fetch-list
+ :exits [:done]
+
+ :cells
+ {:fetch-list
+  {:id       :todo/list
+   :doc      "Fetch filtered list of todos"
+   :schema   {:input  [:map [:filter :string]]
+              :output [:map [:todos [:vector :map]]]}
+   :on-error nil
+   :requires [:db]}
+
+  :fetch-stats
+  {:id       :todo/count-stats
+   :doc      "Fetch todo count statistics"
+   :schema   {:input  [:map]
+              :output [:map [:stats [:map
+                              [:active :int]
+                              [:completed :int]
+                              [:total :int]]]]}
+   :on-error nil
+   :requires [:db]}
+
+  :render-list
+  {:id       :ui/render-todo-list
+   :doc      "Render the todo list fragment"
+   :schema   {:input  [:map
+                [:todos [:vector :map]]
+                [:stats [:map [:active :int] [:completed :int] [:total :int]]]
+                [:filter :string]]
+              :output [:map [:html :string]]}
+   :on-error nil
+   :requires []}}
+
+ :edges
+ {:fetch-list  :fetch-stats
+  :fetch-stats :render-list
+  :render-list :_exit/done}
+
+ :dispatches {}}

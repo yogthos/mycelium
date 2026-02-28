@@ -1,0 +1,8 @@
+#kaocha/v1
+{:tests [{:id          :unit
+          :test-paths  ["test/clj"]
+          :source-paths ["src/clj"]
+          :ns-patterns  [".*-test$"]}]
+ :reporter [kaocha.report/dots]
+ :color?   true
+ :randomize? true}

@@ -1,0 +1,38 @@
+{% if stats.total > 0 %}
+<section class="main">
+  <input id="toggle-all" class="toggle-all" type="checkbox"
+         hx-post="/todos/toggle-all?filter={{filter}}" hx-target="#todo-container" hx-swap="innerHTML"
+         {% if stats.active = 0 %}checked{% endif %}>
+  <label for="toggle-all">Mark all as complete</label>
+  <ul class="todo-list">
+    {% for todo in todos %}
+    <li class="{% if todo.completed = 1 %}completed{% endif %}" id="todo-{{todo.id}}">
+      <div class="view">
+        <input class="toggle" type="checkbox"
+               hx-patch="/todos/{{todo.id}}/toggle?filter={{filter}}" hx-target="#todo-container" hx-swap="innerHTML"
+               {% if todo.completed = 1 %}checked{% endif %}>
+        <label hx-get="/todos/{{todo.id}}/edit?filter={{filter}}" hx-trigger="dblclick"
+               hx-target="#todo-{{todo.id}}" hx-swap="innerHTML">{{todo.title}}</label>
+        <button class="destroy"
+                hx-delete="/todos/{{todo.id}}?filter={{filter}}" hx-target="#todo-container" hx-swap="innerHTML"></button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+<footer class="footer">
+  <span class="todo-count"><strong>{{stats.active}}</strong> {% if stats.active = 1 %}item{% else %}items{% endif %} left</span>
+  <ul class="filters">
+    <li><a href="/?filter=all" class="{% if filter = "all" %}selected{% endif %}"
+           hx-get="/?filter=all" hx-target="#todo-container" hx-swap="innerHTML" hx-push-url="true">All</a></li>
+    <li><a href="/?filter=active" class="{% if filter = "active" %}selected{% endif %}"
+           hx-get="/?filter=active" hx-target="#todo-container" hx-swap="innerHTML" hx-push-url="true">Active</a></li>
+    <li><a href="/?filter=completed" class="{% if filter = "completed" %}selected{% endif %}"
+           hx-get="/?filter=completed" hx-target="#todo-container" hx-swap="innerHTML" hx-push-url="true">Completed</a></li>
+  </ul>
+  {% if stats.completed > 0 %}
+  <button class="clear-completed"
+          hx-post="/todos/clear-completed?filter={{filter}}" hx-target="#todo-container" hx-swap="innerHTML">Clear completed</button>
+  {% endif %}
+</footer>
+{% endif %}

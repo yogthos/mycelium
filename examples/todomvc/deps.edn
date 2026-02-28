@@ -1,0 +1,73 @@
+{:paths   ["src/clj"
+           "resources"]
+
+ :deps    {org.clojure/clojure             {:mvn/version "1.12.4"}
+
+           ;; Routing
+           metosin/reitit                  {:mvn/version "0.10.0"}
+
+           ;; Ring
+           metosin/ring-http-response      {:mvn/version "0.9.5"}
+           ring/ring-core                  {:mvn/version "1.15.3"}
+           ring/ring-defaults              {:mvn/version "0.7.0"}
+
+           ;; Logging
+           ch.qos.logback/logback-classic  {:mvn/version "1.5.32"}
+
+           ;; Data coercion
+           luminus-transit/luminus-transit {:mvn/version "0.1.6"
+                                            :exclusions [com.cognitect/transit-clj]}
+           metosin/muuntaja                {:mvn/version "0.6.11"}
+
+           ;; kit Libs
+           io.github.kit-clj/kit-core {:mvn/version "1.0.10"}
+           io.github.kit-clj/kit-undertow {:mvn/version "1.0.10"}
+
+           ;; Mycelium
+           io.github.yogthos/mycelium {:local/root "../.."}
+
+           ;; Templating
+           selmer/selmer {:mvn/version "1.12.61"}
+
+           ;; DB
+           com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+           org.xerial/sqlite-jdbc            {:mvn/version "3.47.1.0"}
+           migratus/migratus                 {:mvn/version "1.5.6"}
+           }
+ :aliases {:build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.12"}}
+                   :ns-default build}
+
+
+           :dev  {:extra-deps  {com.lambdaisland/classpath      {:mvn/version "0.6.58"}
+                                criterium/criterium             {:mvn/version "0.4.6"}
+                                expound/expound                 {:mvn/version "0.9.0"}
+                                integrant/repl                  {:mvn/version "0.5.0"}
+                                mvxcvi/cljstyle                 {:mvn/version "0.17.642"}
+                                pjstadig/humane-test-output     {:mvn/version "0.11.0"}
+                                ring/ring-devel                 {:mvn/version "1.15.3"}
+                                ring/ring-mock                  {:mvn/version "0.6.2"}
+                                io.github.kit-clj/kit-generator {:mvn/version "0.2.9"}
+                                org.clojure/tools.namespace     {:mvn/version "1.5.1"}
+                                }
+                  :extra-paths ["env/dev/clj" "env/dev/resources" "test/clj"]}
+           :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.5.1"}}
+                   :main-opts  ["-m" "nrepl.cmdline" "-i"]}
+           :cider {:extra-deps {nrepl/nrepl       {:mvn/version "1.5.1"}
+                                cider/cider-nrepl {:mvn/version "0.58.0"}}
+                   :main-opts  ["-m" "nrepl.cmdline" "--middleware" "[cider.nrepl/cider-middleware]" "-i"]}
+
+           :test {:extra-deps  {lambdaisland/kaocha                   {:mvn/version "1.91.1392"}
+                                criterium/criterium                  {:mvn/version "0.4.6"}
+                                expound/expound                      {:mvn/version "0.9.0"}
+                                integrant/repl                       {:mvn/version "0.5.0"}
+                                pjstadig/humane-test-output          {:mvn/version "0.11.0"}
+                                ring/ring-devel                      {:mvn/version "1.15.3"}
+                                ring/ring-mock                       {:mvn/version "0.6.2"}
+                                io.github.kit-clj/kit-generator      {:mvn/version "0.2.9"}
+                                org.clojure/tools.namespace          {:mvn/version "1.5.0"}
+                                peridot/peridot                      {:mvn/version "0.5.4"}
+                                org.clj-commons/byte-streams         {:mvn/version "0.3.4"}
+                                com.lambdaisland/classpath           {:mvn/version "0.6.58"}}
+                  :extra-paths ["env/dev/clj" "env/dev/resources" "env/test/resources" "test/clj"]
+                  :main-opts   ["-m" "kaocha.runner"]}}
+ }

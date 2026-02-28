@@ -1,0 +1,19 @@
+{% extends "templates/base.html" %}
+{% block content %}
+<section class="todoapp">
+  <header class="header">
+    <h1>todos</h1>
+    <form hx-post="/todos" hx-target="#todo-container" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful) this.reset()">
+      <input class="new-todo" name="title" placeholder="What needs to be done?" autofocus>
+    </form>
+  </header>
+  <div id="todo-container">
+    {% include "templates/partials/todo-list.html" %}
+  </div>
+</section>
+<footer class="info">
+  <p>Double-click to edit a todo</p>
+  <p>Built with <a href="https://github.com/yogthos/mycelium">Mycelium</a> + HTMX</p>
+</footer>
+{% endblock %}
