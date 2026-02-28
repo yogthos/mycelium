@@ -1,7 +1,8 @@
 (ns mycelium.middleware
   "Ring middleware and handlers for bridging HTTP requests to Mycelium workflows."
   (:require [malli.core :as m]
-            [maestro.core :as fsm]))
+            [maestro.core :as fsm]
+            [promesa.core :as p]))
 
 (defn html-response
   "Standard HTML response from workflow result. Extracts :html key."
@@ -23,7 +24,8 @@
                             :errors (:errors explanation)
                             :data   initial-data}))]
     {:mycelium/input-error input-error}
-    (fsm/run compiled-fsm resources {:data initial-data})))
+    (let [result (fsm/run compiled-fsm resources {:data initial-data})]
+      (if (p/promise? result) @result result))))
 
 (defn workflow-handler
   "Creates a Ring handler from a pre-compiled workflow.

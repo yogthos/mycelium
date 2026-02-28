@@ -2,7 +2,8 @@
   "Hierarchical composition: wrapping workflows as cells for nesting."
   (:require [mycelium.cell :as cell]
             [mycelium.workflow :as wf]
-            [maestro.core :as fsm]))
+            [maestro.core :as fsm]
+            [promesa.core :as p]))
 
 (def workflow-cell-dispatches
   "Default dispatch predicates for composed workflow cells.
@@ -34,7 +35,7 @@
         handler (fn [resources data]
                   (try
                     (let [result (fsm/run compiled resources {:data data})]
-                      result)
+                      (if (p/promise? result) @result result))
                     (catch Exception e
                       (-> data
                           (assoc :mycelium/error (ex-message e))))))]

@@ -9,7 +9,8 @@
             [mycelium.middleware :as mw]
             [mycelium.system :as sys]
             [malli.core :as m]
-            [maestro.core :as fsm]))
+            [maestro.core :as fsm]
+            [promesa.core :as p]))
 
 ;; --- Cell registry ---
 
@@ -79,17 +80,24 @@
 
 ;; --- Execution ---
 
+(defn- deref-if-promise
+  "Derefs a Promesa promise to a plain value; returns non-promises as-is."
+  [result]
+  (if (p/promise? result) @result result))
+
 (defn run-compiled
   "Runs a pre-compiled workflow. Zero compilation overhead per call.
    Use `pre-compile` to create the compiled workflow at startup."
   ([compiled-workflow resources initial-data]
    (if-let [input-error (check-input-schema compiled-workflow initial-data)]
      {:mycelium/input-error input-error}
-     (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data})))
+     (deref-if-promise
+      (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data}))))
   ([compiled-workflow resources initial-data opts]
    (if-let [input-error (check-input-schema compiled-workflow initial-data)]
      {:mycelium/input-error input-error}
-     (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data}))))
+     (deref-if-promise
+      (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data})))))
 
 (defn run-compiled-async
   "Like run-compiled but returns a future."
