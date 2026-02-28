@@ -173,6 +173,30 @@
       (is (= :found (get-in results [:found :matched-dispatch])))
       (is (= :not-found (get-in results [:not-found :matched-dispatch]))))))
 
+;; ===== test-transitions without dispatches =====
+
+(deftest test-transitions-no-dispatches-test
+  (testing "test-transitions works for cells with no dispatch predicates (output-only check)"
+    (defmethod cell/cell-spec :dev/no-dispatch [_]
+      {:id      :dev/no-dispatch
+       :handler (fn [_ data]
+                  (assoc data :risk-level
+                         (cond (>= (:score data) 700) :low
+                               (>= (:score data) 600) :medium
+                               :else                   :high)))
+       :schema  {:input [:map [:score :int]]
+                 :output [:map [:risk-level [:enum :low :medium :high]]]}})
+    (let [results (dev/test-transitions :dev/no-dispatch
+                    {:low    {:input {:score 750}}
+                     :medium {:input {:score 650}}
+                     :high   {:input {:score 400}}})]
+      (is (true? (get-in results [:low :pass?])))
+      (is (true? (get-in results [:medium :pass?])))
+      (is (true? (get-in results [:high :pass?])))
+      (is (= :low (get-in results [:low :output :risk-level])))
+      (is (= :medium (get-in results [:medium :output :risk-level])))
+      (is (= :high (get-in results [:high :output :risk-level]))))))
+
 ;; ===== enumerate-paths =====
 
 (deftest enumerate-paths-test
@@ -285,3 +309,56 @@
       (is (contains? (:no-path-to-end analysis) :dead-end))
       ;; :start does have a path to end via :skip
       (is (not (contains? (:no-path-to-end analysis) :start))))))
+
+;; ===== infer-workflow-schema =====
+
+(deftest infer-workflow-schema-linear-test
+  (testing "infer-workflow-schema shows key accumulation through a linear workflow"
+    (defmethod cell/cell-spec :dev/schema-a [_]
+      {:id      :dev/schema-a
+       :handler (fn [_ data] (assoc data :a 1))
+       :schema  {:input [:map [:x :int]] :output [:map [:a :int]]}})
+    (defmethod cell/cell-spec :dev/schema-b [_]
+      {:id      :dev/schema-b
+       :handler (fn [_ data] (assoc data :b 2))
+       :schema  {:input [:map [:a :int]] :output [:map [:b :int]]}})
+
+    (let [result (dev/infer-workflow-schema
+                  {:cells {:start :dev/schema-a
+                           :step2 :dev/schema-b}
+                   :edges {:start :step2
+                           :step2 :end}
+                   :dispatches {}})]
+      ;; :start should have :x from input
+      (is (contains? (:available-before (get result :start)) :x))
+      ;; :start adds :a
+      (is (contains? (:adds (get result :start)) :a))
+      ;; :step2 should have :x and :a available
+      (is (contains? (:available-before (get result :step2)) :x))
+      (is (contains? (:available-before (get result :step2)) :a))
+      ;; :step2 adds :b
+      (is (contains? (:adds (get result :step2)) :b))
+      ;; :step2 available-after includes all three
+      (is (= #{:x :a :b} (:available-after (get result :step2)))))))
+
+(deftest infer-workflow-schema-branching-test
+  (testing "infer-workflow-schema handles branching correctly"
+    (defmethod cell/cell-spec :dev/schema-router [_]
+      {:id      :dev/schema-router
+       :handler (fn [_ data] data)
+       :schema  {:input [:map [:x :int]]
+                 :output {:ok [:map [:a :int]] :fail [:map [:err :string]]}}})
+    (defmethod cell/cell-spec :dev/schema-leaf [_]
+      {:id      :dev/schema-leaf
+       :handler (fn [_ data] (assoc data :done true))
+       :schema  {:input [:map [:a :int]] :output [:map [:done :boolean]]}})
+
+    (let [result (dev/infer-workflow-schema
+                  {:cells {:start :dev/schema-router
+                           :leaf  :dev/schema-leaf}
+                   :edges {:start {:ok :leaf, :fail :end}
+                           :leaf  :end}
+                   :dispatches {:start [[:ok (fn [d] (:a d))]
+                                        [:fail (fn [d] (:err d))]]}})]
+      (is (some? (get result :start)))
+      (is (some? (get result :leaf))))))

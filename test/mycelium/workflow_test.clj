@@ -469,3 +469,51 @@
             :dispatches {:start [[:next (fn [_] true)]
                                   [:skip (fn [_] false)]]}})))))
 
+;; ===== Pipeline shorthand in programmatic workflows =====
+
+(deftest pipeline-compiles-and-runs-test
+  (testing "Pipeline shorthand compiles and runs correctly"
+    (register-cells!)
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start  :test/cell-a
+                             :step-b :test/cell-b
+                             :step-c :test/cell-c}
+                     :pipeline [:start :step-b :step-c]})
+          result (fsm/run compiled {} {:data {:x 1}})]
+      (is (true? (:a-done result)))
+      (is (true? (:b-done result)))
+      (is (true? (:c-done result))))))
+
+(deftest pipeline-plus-edges-throws-test
+  (testing "Pipeline + edges throws"
+    (register-cells!)
+    (is (thrown-with-msg? Exception #"mutually exclusive"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :pipeline [:start]
+            :edges {:start :end}})))))
+
+(deftest pipeline-plus-dispatches-throws-test
+  (testing "Pipeline + dispatches throws"
+    (register-cells!)
+    (is (thrown-with-msg? Exception #"mutually exclusive"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :pipeline [:start]
+            :dispatches {:start [[:done (constantly true)]]}})))))
+
+(deftest pipeline-empty-throws-test
+  (testing "Empty pipeline throws"
+    (is (thrown-with-msg? Exception #"at least 1"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :pipeline []})))))
+
+(deftest pipeline-invalid-cell-throws-test
+  (testing "Pipeline referencing non-existent cell throws"
+    (register-cells!)
+    (is (thrown-with-msg? Exception #"not in :cells"
+          (wf/compile-workflow
+           {:cells {:start :test/cell-a}
+            :pipeline [:start :nonexistent]})))))
+

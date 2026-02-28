@@ -5,6 +5,77 @@
             [maestro.core :as fsm]
             [promesa.core :as p]))
 
+(defn- get-map-entries
+  "Extracts top-level entries from a Malli :map schema.
+   Returns a vector of [key type] pairs, or nil if not a :map schema."
+  [schema]
+  (when (and (vector? schema) (= :map (first schema)))
+    (vec (keep (fn [entry]
+                 (when (vector? entry)
+                   [(first entry) (second entry)]))
+               (rest schema)))))
+
+(defn- collect-end-reaching-output-entries
+  "Walks workflow edges to find cells routing to :end and collects their output entries.
+   Returns a vector of [key type] pairs representing the union of all outputs."
+  [edges cells]
+  (let [entries (atom {})]
+    (doseq [[cell-name edge-def] edges]
+      (let [cell-id (get cells cell-name)]
+        (when cell-id
+          (let [cell (cell/get-cell cell-id)
+                output (when cell (get-in cell [:schema :output]))]
+            (when output
+              (cond
+                ;; Unconditional edge to :end
+                (= :end edge-def)
+                (when-let [es (cond
+                                (vector? output) (get-map-entries output)
+                                (map? output) (mapcat (fn [[_ s]] (or (get-map-entries s) [])) output))]
+                  (doseq [[k t] es]
+                    (swap! entries (fn [m] (if (contains? m k) m (assoc m k t))))))
+
+                ;; Map edges — check which transitions route to :end
+                (map? edge-def)
+                (let [end-transitions (set (keep (fn [[transition target]]
+                                                   (when (= :end target) transition))
+                                                 edge-def))]
+                  (when (seq end-transitions)
+                    (let [es (cond
+                               ;; vector output: all transitions share the same schema
+                               (vector? output)
+                               (get-map-entries output)
+
+                               ;; map output: only take entries from transitions routing to :end
+                               (map? output)
+                               (mapcat (fn [t]
+                                         (when-let [s (get output t)]
+                                           (or (get-map-entries s) [])))
+                                       end-transitions))]
+                      (doseq [[k t] es]
+                        (swap! entries (fn [m] (if (contains? m k) m (assoc m k t))))))))))))))
+    (vec @entries)))
+
+(defn- infer-workflow-output-schema
+  "Infers a per-transition output schema for a composed cell.
+   :success path gets the union of output keys from cells routing to :end.
+   :failure path gets [:map [:mycelium/error :any]].
+   Only infers when the caller's :output schema is bare :map keyword.
+   If the caller provides a proper [:map ...] vector, uses that directly."
+  [workflow schema]
+  (let [output (:output schema)]
+    (if (and (not (keyword? output)) (vector? output))
+      ;; Caller provided a real schema — use it as :success, add :failure
+      {:success output
+       :failure [:map [:mycelium/error :any]]}
+      ;; Infer from child workflow
+      (let [entries (collect-end-reaching-output-entries (:edges workflow) (:cells workflow))]
+        (if (seq entries)
+          {:success (into [:map] entries)
+           :failure [:map [:mycelium/error :any]]}
+          ;; Fall back to bare :map
+          :map)))))
+
 (def workflow-cell-dispatches
   "Default dispatch predicates for composed workflow cells.
    Ordered vector — :success checked first, :failure as fallback."
@@ -41,10 +112,10 @@
                           (assoc :mycelium/error (ex-message e))))))]
     {:id                 cell-id
      :handler            handler
-     ;; Use the provided input schema but make output open (:map)
-     ;; because on :failure the output won't match the happy-path schema.
-     ;; The child workflow's own interceptors enforce output schemas internally.
-     :schema             {:input (:input schema) :output :map}
+     ;; Infer per-transition output schema from child workflow's end-reaching cells.
+     ;; If the caller provided a proper [:map ...] vector, that takes precedence.
+     :schema             {:input (:input schema)
+                          :output (infer-workflow-output-schema workflow schema)}
      :default-dispatches workflow-cell-dispatches}))
 
 (defn register-workflow-cell!

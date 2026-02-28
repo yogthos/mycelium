@@ -3,6 +3,7 @@
             [mycelium.cell :as cell]
             [mycelium.workflow :as wf]
             [mycelium.compose :as compose]
+            [mycelium.core :as myc]
             [maestro.core :as fsm]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
@@ -292,3 +293,82 @@
         ;; Third is the parent's trace entry for the composed cell itself
         (is (= :start (:cell (nth trace 2))))
         (is (= :comp/traced-multi (:cell-id (nth trace 2))))))))
+
+;; ===== 10. Inferred output schema from child workflow =====
+
+(deftest inferred-output-schema-test
+  (testing "workflow->cell infers output keys from child workflow's end-reaching cells"
+    (defmethod cell/cell-spec :comp/produce-x [_]
+      {:id      :comp/produce-x
+       :handler (fn [_ data] (assoc data :x-val 42))
+       :schema  {:input [:map [:a :int]]
+                 :output [:map [:x-val :int]]}})
+
+    (let [child-wf {:cells {:start :comp/produce-x}
+                     :edges {:start :end}
+                     :dispatches {}}
+          spec (compose/workflow->cell :comp/inferred child-wf
+                                       {:input [:map [:a :int]]
+                                        :output :map})]
+      ;; Output should be a per-transition map, not bare :map
+      (is (map? (get-in spec [:schema :output])))
+      ;; :success should contain the inferred keys
+      (let [success-schema (get-in spec [:schema :output :success])]
+        (is (vector? success-schema))
+        (is (= :map (first success-schema)))
+        ;; Should include :x-val
+        (let [key-names (set (map first (filter vector? (rest success-schema))))]
+          (is (contains? key-names :x-val))))
+      ;; :failure should exist
+      (is (some? (get-in spec [:schema :output :failure]))))))
+
+(deftest inferred-output-enables-chain-validation-test
+  (testing "Parent workflow chain validation passes without set-cell-schema! workaround"
+    (defmethod cell/cell-spec :comp/inner-step [_]
+      {:id      :comp/inner-step
+       :handler (fn [_ data]
+                  (assoc data :credit-score 750 :risk-level :low))
+       :schema  {:input [:map [:name :string]]
+                 :output [:map [:credit-score :int] [:risk-level :keyword]]}})
+
+    ;; Register child as composed cell — no set-cell-schema! needed
+    (let [child-wf {:cells {:start :comp/inner-step}
+                     :edges {:start :end}
+                     :dispatches {}}]
+      (compose/register-workflow-cell! :comp/auto-inferred child-wf
+                                       {:input [:map [:name :string]]
+                                        :output :map}))
+
+    ;; Downstream cell needs keys produced by the composed cell
+    (defmethod cell/cell-spec :comp/downstream [_]
+      {:id      :comp/downstream
+       :handler (fn [_ data] (assoc data :tier (if (>= (:credit-score data) 700) "high" "low")))
+       :schema  {:input [:map [:credit-score :int]]
+                 :output [:map [:tier :string]]}})
+
+    ;; Parent workflow should compile without errors
+    ;; The chain validator sees :credit-score from the inferred output of :comp/auto-inferred
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start      :comp/auto-inferred
+                             :downstream :comp/downstream}
+                     :edges {:start      {:success :downstream, :failure :error}
+                             :downstream :end}
+                     :dispatches {:downstream []}})
+          result (fsm/run compiled {} {:data {:name "Alice"}})]
+      (is (= "high" (:tier result))))))
+
+(deftest explicit-output-schema-takes-precedence-test
+  (testing "When caller provides [:map ...] output, inference is skipped"
+    (defmethod cell/cell-spec :comp/explicit-inner [_]
+      {:id      :comp/explicit-inner
+       :handler (fn [_ data] (assoc data :y 1))
+       :schema  {:input [:map] :output [:map [:y :int]]}})
+
+    (let [child-wf {:cells {:start :comp/explicit-inner}
+                     :edges {:start :end}
+                     :dispatches {}}
+          spec (compose/workflow->cell :comp/explicit-out child-wf
+                                       {:input [:map]
+                                        :output [:map [:y :int]]})]
+      ;; Output should use the caller's schema for :success
+      (is (= [:map [:y :int]] (get-in spec [:schema :output :success]))))))

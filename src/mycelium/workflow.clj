@@ -292,6 +292,36 @@
           #{}
           (:cells join-def)))
 
+;; ===== Pipeline expansion =====
+
+(defn- expand-pipeline
+  "Expands a :pipeline vector into :edges and :dispatches for programmatic workflows.
+   Pipeline is mutually exclusive with :edges, :dispatches, and :joins."
+  [{:keys [pipeline cells edges dispatches joins] :as workflow}]
+  (if-not pipeline
+    workflow
+    (do
+      (when edges
+        (throw (ex-info ":pipeline is mutually exclusive with :edges" {})))
+      (when dispatches
+        (throw (ex-info ":pipeline is mutually exclusive with :dispatches" {})))
+      (when joins
+        (throw (ex-info ":pipeline is mutually exclusive with :joins" {})))
+      (when (empty? pipeline)
+        (throw (ex-info ":pipeline must have at least 1 element" {})))
+      (let [cell-names (set (keys cells))]
+        (doseq [name pipeline]
+          (when-not (contains? cell-names name)
+            (throw (ex-info (str "Pipeline references " name " which is not in :cells")
+                            {:pipeline-ref name :valid-cells cell-names})))))
+      (let [pairs (partition 2 1 pipeline)
+            expanded-edges (into {} (concat
+                                      (map (fn [[from to]] [from to]) pairs)
+                                      [[(last pipeline) :end]]))]
+        (-> workflow
+            (dissoc :pipeline)
+            (assoc :edges expanded-edges :dispatches {}))))))
+
 ;; ===== Validation =====
 
 (defn- validate-cells-exist!
@@ -430,33 +460,34 @@
 (defn validate-workflow
   "Runs all validations on a workflow definition.
    Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
-  [{:keys [cells edges dispatches joins input-schema]}]
-  (validate-cells-exist! cells)
-  ;; Validate :input-schema well-formedness if present
-  (when input-schema
-    (v/validate-malli-schema! input-schema "input-schema"))
-  ;; Validate join definitions
-  (let [joins-map (or joins {})]
-    (when (seq joins-map)
-      (validate-join-defs! joins-map cells edges)
-      (validate-join-output-conflicts! joins-map cells))
-    ;; For edge-target and reachability validation, include join names as valid targets
-    (let [cell-names     (set (keys cells))
-          join-names     (set (keys joins-map))
-          ;; Members consumed by joins should not be in edges but are valid cells
-          join-members   (set (mapcat :cells (vals joins-map)))
-          ;; Non-member cell names = cells that appear in edges
-          edge-cell-names (set/difference cell-names join-members)
-          ;; Valid names for edge targets = non-member cells + join names
-          valid-names    (set/union edge-cell-names join-names)]
-      (v/validate-edge-targets! edges valid-names)
-      (v/validate-reachability! edges valid-names))
-    ;; Merge default dispatches — include join default dispatches (filtered to match edge keys)
-    (let [join-dispatches    (compute-join-dispatches joins-map edges)
-          effective-dispatches (merge join-dispatches
-                                      (merge-default-dispatches dispatches edges cells))]
-      (v/validate-dispatch-coverage! edges effective-dispatches))
-    (validate-schema-chain! edges cells joins-map)))
+  [{:keys [cells edges dispatches joins input-schema pipeline] :as raw-workflow}]
+  (let [{:keys [cells edges dispatches joins input-schema]} (expand-pipeline raw-workflow)]
+    (validate-cells-exist! cells)
+    ;; Validate :input-schema well-formedness if present
+    (when input-schema
+      (v/validate-malli-schema! input-schema "input-schema"))
+    ;; Validate join definitions
+    (let [joins-map (or joins {})]
+      (when (seq joins-map)
+        (validate-join-defs! joins-map cells edges)
+        (validate-join-output-conflicts! joins-map cells))
+      ;; For edge-target and reachability validation, include join names as valid targets
+      (let [cell-names     (set (keys cells))
+            join-names     (set (keys joins-map))
+            ;; Members consumed by joins should not be in edges but are valid cells
+            join-members   (set (mapcat :cells (vals joins-map)))
+            ;; Non-member cell names = cells that appear in edges
+            edge-cell-names (set/difference cell-names join-members)
+            ;; Valid names for edge targets = non-member cells + join names
+            valid-names    (set/union edge-cell-names join-names)]
+        (v/validate-edge-targets! edges valid-names)
+        (v/validate-reachability! edges valid-names))
+      ;; Merge default dispatches — include join default dispatches (filtered to match edge keys)
+      (let [join-dispatches    (compute-join-dispatches joins-map edges)
+            effective-dispatches (merge join-dispatches
+                                        (merge-default-dispatches dispatches edges cells))]
+        (v/validate-dispatch-coverage! edges effective-dispatches))
+      (validate-schema-chain! edges cells joins-map))))
 
 ;; ===== Workflow-level interceptor matching =====
 
@@ -562,10 +593,11 @@
   "Compiles a workflow definition into a Maestro FSM.
    Returns the compiled (ready-to-run) FSM."
   ([workflow] (compile-workflow workflow {}))
-  ([{:keys [cells edges dispatches joins] :as workflow} opts]
-   ;; Validate
-   (validate-workflow workflow)
-   (let [joins-map (or joins {})
+  ([raw-workflow opts]
+   (let [{:keys [cells edges dispatches joins] :as workflow} (expand-pipeline raw-workflow)]
+     ;; Validate
+     (validate-workflow workflow)
+     (let [joins-map (or joins {})
          ;; Determine which cells are consumed by joins
          join-members (set (mapcat :cells (vals joins-map)))
          ;; Merge default dispatches from cell specs AND join default dispatches (filtered to edge keys)
@@ -663,4 +695,4 @@
        (let [names (mapv #(get state->names % %) (:no-path-to-end analysis))]
          (throw (ex-info (str "States with no path to end: " names)
                          {:no-path-to-end names :analysis analysis}))))
-     (fsm/compile spec))))
+     (fsm/compile spec)))))
