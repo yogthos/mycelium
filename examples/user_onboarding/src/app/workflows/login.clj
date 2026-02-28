@@ -12,29 +12,32 @@
   (manifest/load-manifest
    (str (io/resource "workflows/login-page.edn"))))
 
-(def login-page-workflow
-  (manifest/manifest->workflow login-page-manifest))
+(def compiled-login-page
+  (myc/pre-compile
+   (manifest/manifest->workflow login-page-manifest)
+   mw/workflow-opts))
 
 (def login-submit-manifest
   (manifest/load-manifest
    (str (io/resource "workflows/login-submit.edn"))))
 
-(def login-submit-workflow
-  (manifest/manifest->workflow login-submit-manifest))
+(def compiled-login-submit
+  (myc/pre-compile
+   (manifest/manifest->workflow login-submit-manifest)
+   mw/workflow-opts))
 
 (defn run-login-page
   "Renders the login form."
   []
-  (myc/run-workflow login-page-workflow {} {} mw/workflow-opts))
+  (myc/run-compiled compiled-login-page {} {}))
 
 (defn run-login-submit
   "Processes login form submission."
   [db request]
-  (myc/run-workflow
-   login-submit-workflow
+  (myc/run-compiled
+   compiled-login-submit
    {:db db}
    {:http-request {:headers (or (:headers request) {})
                    :body    (or (:form-params request)
                                 (:body-params request)
-                                (:body request))}}
-   mw/workflow-opts))
+                                (:body request))}}))

@@ -61,14 +61,16 @@ Cell names are the workflow-level names (keys in `:cells` map), not the cell reg
 
 ## Execution Order
 
-Interceptors compose in declaration order (first declared = outermost wrapper):
+Interceptors compose in declaration order:
 
 ```clojure
 :interceptors [{:id :first, :scope :all, :pre pre-1, :post post-1}
                {:id :second, :scope :all, :pre pre-2, :post post-2}]
 ```
 
-Execution: `pre-1 → pre-2 → handler → post-2 → post-1`
+Execution: `pre-1 → pre-2 → handler → post-1 → post-2`
+
+Both `:pre` and `:post` functions run in declaration order (first declared runs first).
 
 ## How It Works
 

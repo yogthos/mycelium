@@ -76,17 +76,38 @@ start → validate → fetch-profile → render
 
 ## Running Workflows
 
+### Pre-compiled (recommended for production)
+
+Pre-compile once at startup, run with zero compilation overhead per request:
+
 ```clojure
-;; Sync
+;; At startup
+(def compiled (myc/pre-compile workflow-def opts))
+
+;; Per request — zero compilation overhead
+(myc/run-compiled compiled resources initial-data)
+
+;; Async variant — returns a future
+(myc/run-compiled-async compiled resources initial-data)
+```
+
+`pre-compile` performs all validation, FSM compilation, and Malli schema compilation at call time. `run-compiled` does only input-schema validation and FSM execution.
+
+### Convenience (compiles every call)
+
+```clojure
+;; Sync — compiles and runs in one step
 (myc/run-workflow workflow-def resources initial-data)
 (myc/run-workflow workflow-def resources initial-data opts)
 
-;; Async
+;; Async — returns a future
 (myc/run-workflow-async workflow-def resources initial-data)
 (myc/run-workflow-async workflow-def resources initial-data opts)
 ```
 
-**opts map** (optional):
+These are convenient for tests and one-off runs. For repeated execution of the same workflow (e.g. HTTP request handling), use `pre-compile` + `run-compiled`.
+
+**opts map** (optional, passed to `pre-compile` or `run-workflow`):
 ```clojure
 {:pre  (fn [fsm-state resources] -> fsm-state)  ;; FSM-level pre interceptor
  :post (fn [fsm-state resources] -> fsm-state)  ;; FSM-level post interceptor

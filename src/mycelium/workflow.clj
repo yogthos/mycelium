@@ -592,6 +592,8 @@
                                           :default-dispatches join-default-dispatches}])))
                                joins-map)
          state->cell (merge state->cell join-cell-specs)
+         ;; Pre-compile all Malli schemas so interceptors use compiled objects
+         state->cell (schema/pre-compile-schemas state->cell)
          ;; Apply workflow-level interceptors (wraps cell handlers)
          wf-interceptors (:interceptors workflow)
          state->cell (apply-workflow-interceptors state->cell cells wf-interceptors)

@@ -5,11 +5,18 @@
 ```clojure
 (require '[mycelium.core :as myc])
 
-;; Run a workflow synchronously
+;; Pre-compile once at startup (recommended for production)
+(def compiled (myc/pre-compile workflow-def opts))
+
+;; Run a pre-compiled workflow (zero compilation overhead)
+(myc/run-compiled compiled resources initial-data)
+(myc/run-compiled-async compiled resources initial-data)  ;; returns a future
+
+;; Convenience: compile + run in one step (re-compiles every call)
 (myc/run-workflow workflow-def resources initial-data)
 (myc/run-workflow workflow-def resources initial-data opts)
 
-;; Run a workflow asynchronously (returns core.async channel)
+;; Async convenience (returns a future)
 (myc/run-workflow-async workflow-def resources initial-data)
 
 ;; Compile a system (all workflows)

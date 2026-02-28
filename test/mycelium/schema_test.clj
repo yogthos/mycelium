@@ -1,5 +1,6 @@
 (ns mycelium.schema-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [malli.core :as m]
             [mycelium.cell :as cell]
             [mycelium.schema :as schema]
             [maestro.core :as fsm]))
@@ -340,3 +341,74 @@
       (let [entry (first (get-in result [:data :mycelium/trace]))]
         (is (= :failing (:cell entry)))
         (is (some? (:error entry)))))))
+
+;; ===== Pre-compiled schema tests =====
+
+(deftest pre-compile-schemas-compiles-input-test
+  (testing "pre-compile-schemas converts raw input schemas to Malli schema objects"
+    (register-test-cell!)
+    (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
+          compiled    (schema/pre-compile-schemas state->cell)
+          cell        (get compiled :test/cell-a)]
+      ;; Input schema should be a compiled Malli schema object, not a raw vector
+      (is (not (vector? (get-in cell [:schema :input]))))
+      (is (m/schema? (get-in cell [:schema :input]))))))
+
+(deftest pre-compile-schemas-compiles-output-vector-test
+  (testing "pre-compile-schemas converts raw vector output schemas to Malli schema objects"
+    (register-test-cell!)
+    (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
+          compiled    (schema/pre-compile-schemas state->cell)
+          cell        (get compiled :test/cell-a)]
+      ;; Output schema (vector form) should be compiled
+      (is (m/schema? (get-in cell [:schema :output]))))))
+
+(deftest pre-compile-schemas-compiles-output-map-test
+  (testing "pre-compile-schemas converts per-transition output schema map values"
+    (register-per-transition-cell!)
+    (let [state->cell {:test/pt-cell (cell/get-cell! :test/pt-cell)}
+          compiled    (schema/pre-compile-schemas state->cell)
+          cell        (get compiled :test/pt-cell)
+          output      (get-in cell [:schema :output])]
+      ;; Output should still be a map, but values should be compiled schemas
+      (is (map? output))
+      (is (m/schema? (get output :success)))
+      (is (m/schema? (get output :failure))))))
+
+(deftest pre-compile-schemas-validate-still-works-test
+  (testing "validate-input/output still work with pre-compiled schemas"
+    (register-test-cell!)
+    (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
+          compiled    (schema/pre-compile-schemas state->cell)
+          cell        (get compiled :test/cell-a)]
+      ;; validate-input still works
+      (is (nil? (schema/validate-input cell {:x 1})))
+      (is (some? (schema/validate-input cell {:x "bad"})))
+      ;; validate-output still works
+      (is (nil? (schema/validate-output cell {:y 42})))
+      (is (some? (schema/validate-output cell {:no-y true}))))))
+
+(deftest pre-compile-schemas-interceptors-work-test
+  (testing "Pre/post interceptors work with pre-compiled schemas"
+    (register-test-cell!)
+    (let [state->cell {:test/cell-a (cell/get-cell! :test/cell-a)}
+          compiled    (schema/pre-compile-schemas state->cell)
+          pre         (schema/make-pre-interceptor compiled)
+          post        (schema/make-post-interceptor compiled nil nil)]
+      ;; Pre: valid data passes
+      (let [fsm-state {:current-state-id :test/cell-a :data {:x 10} :trace []}]
+        (is (= fsm-state (pre fsm-state {}))))
+      ;; Pre: invalid data → error
+      (let [fsm-state {:current-state-id :test/cell-a :data {:x "bad"} :trace []}
+            result    (pre fsm-state {})]
+        (is (= ::fsm/error (:current-state-id result))))
+      ;; Post: valid output passes
+      (let [fsm-state {:last-state-id :test/cell-a :current-state-id :some/next
+                        :data {:x 10 :y 42} :trace []}
+            result    (post fsm-state {})]
+        (is (= :some/next (:current-state-id result))))
+      ;; Post: invalid output → error
+      (let [fsm-state {:last-state-id :test/cell-a :current-state-id :some/next
+                        :data {:x 10} :trace []}
+            result    (post fsm-state {})]
+        (is (= ::fsm/error (:current-state-id result)))))))

@@ -1,8 +1,7 @@
 (ns mycelium.system
   "System-level compilation: aggregates multiple manifests into a queryable system description.
    Provides bird's-eye view of all workflows, cells, resources, and cross-workflow analysis."
-  (:require [clojure.set :as set]
-            [clojure.string :as str]))
+  (:require [clojure.string :as str]))
 
 (defn- extract-cell-ids
   "Extracts all cell :id values from a manifest, including join members."

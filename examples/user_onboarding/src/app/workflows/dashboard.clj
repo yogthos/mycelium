@@ -12,15 +12,16 @@
   (manifest/load-manifest
    (str (io/resource "workflows/dashboard.edn"))))
 
-(def workflow-def
-  (manifest/manifest->workflow manifest-data))
+(def compiled-workflow
+  (myc/pre-compile
+   (manifest/manifest->workflow manifest-data)
+   mw/workflow-opts))
 
 (defn run-dashboard
   "Renders the dashboard for an authenticated session."
   [db request]
-  (myc/run-workflow
-   workflow-def
+  (myc/run-compiled
+   compiled-workflow
    {:db db}
    {:http-request {:query-params (or (:query-params request) {})
-                   :cookies      (or (:cookies request) {})}}
-   mw/workflow-opts))
+                   :cookies      (or (:cookies request) {})}}))

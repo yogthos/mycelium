@@ -69,7 +69,13 @@ The target must be a valid cell name in the manifest. This is a **declaration** 
 This:
 - Registers stub handlers for cells not yet implemented
 - Applies manifest metadata (schema, requires) to already-registered cells
-- Returns a workflow definition map suitable for `run-workflow`
+- Returns a workflow definition map suitable for `pre-compile` or `run-workflow`
+
+For production use, pass the result to `myc/pre-compile` to avoid recompilation per request:
+```clojure
+(def compiled (myc/pre-compile workflow-def opts))
+(myc/run-compiled compiled resources initial-data)
+```
 
 ## Input Schema Validation
 
@@ -183,11 +189,14 @@ The `:prompt` string contains everything an LLM needs to implement the cell: sch
 
 ## Typical Workflow Loader Pattern
 
+Use `pre-compile` at load time so requests pay zero compilation cost:
+
 ```clojure
 (ns app.workflows.dashboard
   (:require [mycelium.manifest :as manifest]
             [mycelium.core :as myc]
             [clojure.java.io :as io]
+            [app.middleware :as mw]
             [app.cells.auth]       ;; load cell registrations
             [app.cells.user]
             [app.cells.ui]))
@@ -196,13 +205,17 @@ The `:prompt` string contains everything an LLM needs to implement the cell: sch
   (manifest/load-manifest
    (str (io/resource "workflows/dashboard.edn"))))
 
-(def workflow-def
-  (manifest/manifest->workflow manifest-data))
+(def compiled-workflow
+  (myc/pre-compile
+   (manifest/manifest->workflow manifest-data)
+   mw/workflow-opts))
 
 (defn run-dashboard [db request]
-  (myc/run-workflow
-   workflow-def
+  (myc/run-compiled
+   compiled-workflow
    {:db db}
    {:http-request {:query-params (or (:query-params request) {})
                    :cookies      (or (:cookies request) {})}}))
 ```
+
+`pre-compile` performs workflow validation, FSM compilation, and Malli schema pre-compilation once. `run-compiled` only validates the input schema (if present) and runs the pre-built FSM.
