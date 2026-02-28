@@ -7,7 +7,6 @@
             [mycelium.compose :as compose]
             [mycelium.manifest :as manifest]
             [mycelium.system :as sys]
-            [mycelium.validation :as v]
             [malli.core :as m]
             [maestro.core :as fsm]))
 
@@ -48,10 +47,11 @@
 
 (defn- validate-input-schema
   "Validates initial-data against workflow's :input-schema.
-   Returns nil if valid or no schema, or an error map on failure."
+   Returns nil if valid or no schema, or an error map on failure.
+   Schema well-formedness is checked at compile time (validate-workflow),
+   not here on every call."
   [workflow-def initial-data]
   (when-let [input-schema (:input-schema workflow-def)]
-    (v/validate-malli-schema! input-schema "input-schema")
     (let [schema (m/schema input-schema)
           explanation (m/explain schema initial-data)]
       (when explanation
@@ -76,9 +76,9 @@
   ([workflow-def resources initial-data]
    (run-workflow workflow-def resources initial-data {}))
   ([workflow-def resources initial-data opts]
-   (if-let [input-error (validate-input-schema workflow-def initial-data)]
-     {:mycelium/input-error input-error}
-     (let [compiled (compile-workflow workflow-def opts)]
+   (let [compiled (compile-workflow workflow-def opts)]
+     (if-let [input-error (validate-input-schema workflow-def initial-data)]
+       {:mycelium/input-error input-error}
        (fsm/run compiled resources {:data initial-data})))))
 
 (defn run-workflow-async
@@ -90,9 +90,9 @@
   ([workflow-def resources initial-data]
    (run-workflow-async workflow-def resources initial-data {}))
   ([workflow-def resources initial-data opts]
-   (if-let [input-error (validate-input-schema workflow-def initial-data)]
-     (future {:mycelium/input-error input-error})
-     (let [compiled (compile-workflow workflow-def opts)]
+   (let [compiled (compile-workflow workflow-def opts)]
+     (if-let [input-error (validate-input-schema workflow-def initial-data)]
+       (future {:mycelium/input-error input-error})
        (fsm/run-async compiled resources {:data initial-data})))))
 
 ;; --- System compilation ---

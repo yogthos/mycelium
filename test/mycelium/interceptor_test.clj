@@ -203,7 +203,37 @@
                   {:x 1})]
       (is (= 3 (:post-count result))))))
 
-;; ===== 10. Manifest with :interceptors passes validation and through to workflow =====
+;; ===== 10. Interceptor wrapping preserves async cell behavior =====
+
+(deftest async-cell-with-interceptor-test
+  (testing "Interceptor wrapping works with async cells"
+    (register-cells!)
+    ;; Register an async cell
+    (defmethod cell/cell-spec :intc/async-step [_]
+      {:id      :intc/async-step
+       :handler (fn [_ data callback _error-callback]
+                  (future (callback (assoc data :async-result 42))))
+       :schema  {:input [:map [:x :int]] :output [:map [:async-result :int]]}
+       :async?  true})
+    (let [log (atom [])
+          result (mycelium/run-workflow
+                  {:cells {:start :intc/start
+                           :async-step :intc/async-step}
+                   :edges {:start {:done :async-step}
+                           :async-step {:done :end}}
+                   :dispatches {:start [[:done (constantly true)]]
+                                :async-step [[:done (constantly true)]]}
+                   :interceptors [{:id    :logger
+                                   :scope :all
+                                   :pre   (fn [data]
+                                            (swap! log conj :visited)
+                                            data)}]}
+                  {}
+                  {:x 1})]
+      (is (= 42 (:async-result result)))
+      (is (= 2 (count @log))))))
+
+;; ===== 11. Manifest with :interceptors passes validation and through to workflow =====
 
 (deftest manifest-interceptors-passthrough-test
   (testing "Manifest with :interceptors passes validation and through to workflow"

@@ -43,10 +43,19 @@
   ;; Validate each cell definition
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
-  ;; Validate edge targets: valid targets are cell names + :_exit/name for declared exits
+  ;; Validate :on-error targets and edge targets
   (let [cell-names    (set (keys cells))
         exit-targets  (set (map #(keyword "_exit" (name %)) exits))
         valid-targets (set/union cell-names exit-targets)]
+    ;; Validate :on-error — must be nil, a cell name, or a valid :_exit/* reference
+    (doseq [[cell-name cell-def] cells]
+      (when-let [on-err (:on-error cell-def)]
+        (when-not (contains? valid-targets on-err)
+          (throw (ex-info (str "Fragment " (or id "unknown") " cell " cell-name
+                               " :on-error references " on-err
+                               " which is not a valid cell or exit")
+                          {:fragment-id id :cell-name cell-name
+                           :on-error on-err :valid-targets valid-targets})))))
     (doseq [[from edge-def] edges]
       (let [targets (if (keyword? edge-def) [edge-def] (vals edge-def))]
         (doseq [target targets]
@@ -63,21 +72,6 @@
   fragment)
 
 ;; ===== Fragment expansion =====
-
-(defn- replace-exit-refs
-  "Replaces :_exit/* references in an edge definition with host exit targets."
-  [edge-def exit-mapping]
-  (if (keyword? edge-def)
-    (if (= "_exit" (namespace edge-def))
-      (get exit-mapping (keyword (name edge-def)))
-      edge-def)
-    (into {}
-          (map (fn [[label target]]
-                 (if (and (keyword? target)
-                          (= "_exit" (namespace target)))
-                   [label (get exit-mapping (keyword (name target)))]
-                   [label target])))
-          edge-def)))
 
 (defn expand-fragment
   "Expands a single fragment into cells, edges, and dispatches.
@@ -184,5 +178,5 @@
                          (-> manifest
                              (dissoc :fragments)
                              (update :dispatches #(or % {})))
-                         fragments)]
+                         (sort-by first fragments))]
       result)))

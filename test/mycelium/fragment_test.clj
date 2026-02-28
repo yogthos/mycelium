@@ -64,6 +64,20 @@
       (is (thrown-with-msg? Exception #"exit.*bogus"
             (fragment/validate-fragment bad))))))
 
+;; ===== 3b. Fragment :on-error references nonexistent cell → error =====
+
+(deftest validate-fragment-bad-on-error-test
+  (testing "Fragment cell :on-error pointing to nonexistent internal cell fails validation"
+    (let [bad (assoc-in auth-fragment [:cells :extract-session :on-error] :nonexistent)]
+      (is (thrown-with-msg? Exception #"on-error.*nonexistent"
+            (fragment/validate-fragment bad)))))
+  (testing "Fragment cell :on-error :_exit/* for declared exit passes"
+    (is (some? (fragment/validate-fragment auth-fragment))))
+  (testing "Fragment cell :on-error :_exit/* for undeclared exit fails"
+    (let [bad (assoc-in auth-fragment [:cells :extract-session :on-error] :_exit/bogus)]
+      (is (thrown-with-msg? Exception #"on-error.*bogus"
+            (fragment/validate-fragment bad))))))
+
 ;; ===== 4. Fragment cell name collision with host cell → error =====
 
 (deftest expand-fragment-name-collision-test
@@ -320,3 +334,30 @@
           wf-def   (manifest/manifest->workflow expanded)
           result   (mycelium/run-workflow wf-def {} {:x 42})]
       (is (= "got-abc" (:result result))))))
+
+;; ===== 16. Fragment expansion order is deterministic (sorted by key) =====
+
+(deftest fragment-expansion-deterministic-order-test
+  (testing "Multiple fragments expand in sorted key order for deterministic collision checks"
+    (let [frag-a {:id :frag-a :entry :ca :exits [:done]
+                  :cells {:ca {:id :det/ca :schema {:input [:map] :output [:map [:a :int]]}}}
+                  :edges {:ca {:done :_exit/done}}
+                  :dispatches {:ca [[:done (constantly true)]]}}
+          frag-z {:id :frag-z :entry :cz :exits [:done]
+                  :cells {:cz {:id :det/cz :schema {:input [:map [:a :int]] :output [:map [:z :int]]}}}
+                  :edges {:cz {:done :_exit/done}}
+                  :dispatches {:cz [[:done (constantly true)]]}}
+          ;; Use keys :z-frag and :a-frag so sorted order is :a-frag first
+          host {:id :det-host
+                :fragments {:z-frag {:fragment frag-z :as :step-z :exits {:done :end-cell}}
+                            :a-frag {:fragment frag-a :as :start :exits {:done :step-z}}}
+                :cells {:end-cell {:id :det/end :schema {:input [:map [:z :int]] :output [:map [:out :string]]}}}
+                :edges {:end-cell {:done :end}}
+                :dispatches {:end-cell [[:done (constantly true)]]}}
+          ;; Expand multiple times — result must be identical every time
+          results (repeatedly 10 #(manifest/expand-fragments host))]
+      ;; All 10 expansions should produce the same cell keys
+      (is (apply = (map #(set (keys (:cells %))) results)))
+      ;; :a-frag expands first (sorted), so :start comes from frag-a
+      (let [expanded (first results)]
+        (is (= :det/ca (get-in expanded [:cells :start :id])))))))

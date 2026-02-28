@@ -430,8 +430,11 @@
 (defn validate-workflow
   "Runs all validations on a workflow definition.
    Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
-  [{:keys [cells edges dispatches joins]}]
+  [{:keys [cells edges dispatches joins input-schema]}]
   (validate-cells-exist! cells)
+  ;; Validate :input-schema well-formedness if present
+  (when input-schema
+    (v/validate-malli-schema! input-schema "input-schema"))
   ;; Validate join definitions
   (let [joins-map (or joins {})]
     (when (seq joins-map)
@@ -486,19 +489,35 @@
 
     :else false))
 
+(defn- apply-pres [data pres]
+  (reduce (fn [d pre-fn] (pre-fn d)) data pres))
+
+(defn- apply-posts [data posts]
+  (reduce (fn [d post-fn] (post-fn d)) data posts))
+
 (defn- wrap-handler-with-interceptors
   "Wraps a cell handler with matching workflow-level interceptors.
+   Handles both sync (2-arity) and async (4-arity) handlers.
    Interceptors apply in declaration order: first pre runs first, first post runs first."
   [handler matching-interceptors]
   (if (empty? matching-interceptors)
     handler
-    (let [pres  (keep :pre matching-interceptors)
-          posts (keep :post matching-interceptors)]
-      (fn [resources data]
-        (let [data'   (reduce (fn [d pre-fn] (pre-fn d)) data pres)
-              result  (handler resources data')
-              result' (reduce (fn [d post-fn] (post-fn d)) result posts)]
-          result')))))
+    (let [pres  (seq (keep :pre matching-interceptors))
+          posts (seq (keep :post matching-interceptors))]
+      (fn
+        ;; Sync: (fn [resources data] -> data)
+        ([resources data]
+         (let [data'   (if pres (apply-pres data pres) data)
+               result  (handler resources data')
+               result' (if posts (apply-posts result posts) result)]
+           result'))
+        ;; Async: (fn [resources data callback error-callback])
+        ([resources data callback error-callback]
+         (let [data' (if pres (apply-pres data pres) data)]
+           (handler resources data'
+                    (fn [result]
+                      (callback (if posts (apply-posts result posts) result)))
+                    error-callback)))))))
 
 (defn- apply-workflow-interceptors
   "For each cell, finds matching interceptors and wraps the handler.
