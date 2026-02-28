@@ -3,11 +3,10 @@
 
  :cells
  {:start
-  {:id       :auth/extract-session
-   :doc      "Extract auth token from query parameters"
+  {:id       :auth/extract-cookie-session
+   :doc      "Extract auth token from cookie or query parameters"
    :schema   {:input  [:map
-                        [:http-request [:map
-                          [:query-params map?]]]]
+                        [:http-request [:map]]]
               :output {:success [:map
                                   [:auth-token :string]]
                        :failure [:map

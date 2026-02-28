@@ -58,16 +58,26 @@
                         [:http-response [:map
                           [:status :int]
                           [:body map?]]]]}
+   :requires []}
+
+  :render-error
+  {:id       :ui/render-error
+   :doc      "Render a styled error page"
+   :schema   {:input  [:map]
+              :output [:map
+                        [:html :string]
+                        [:error-status :int]]}
    :requires []}}
 
  :edges
  {:start            {:success :validate-session
-                     :failure :error}
+                     :failure :render-error}
   :validate-session {:authorized   :fetch-profile
-                     :unauthorized :error}
+                     :unauthorized :render-error}
   :fetch-profile    {:found     :render-home
-                     :not-found :error}
-  :render-home      {:done :end}}
+                     :not-found :render-error}
+  :render-home      {:done :end}
+  :render-error     {:done :end}}
 
  :dispatches
  {:start            [[:success (fn [data] (:auth-token data))]
@@ -76,4 +86,5 @@
                      [:unauthorized (fn [data] (not (:session-valid data)))]]
   :fetch-profile    [[:found     (fn [data] (:profile data))]
                      [:not-found (fn [data] (:error-type data))]]
-  :render-home      [[:done (fn [_] true)]]}}
+  :render-home      [[:done (fn [_] true)]]
+  :render-error     [[:done (fn [_] true)]]}}

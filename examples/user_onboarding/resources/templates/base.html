@@ -11,6 +11,8 @@
     nav a { color: #e2e8f0; text-decoration: none; font-size: 0.9rem; }
     nav a:hover { color: #fff; }
     nav .brand { font-weight: 700; font-size: 1.1rem; color: #81e6d9; }
+    nav .spacer { flex: 1; }
+    nav .nav-user { color: #81e6d9; font-size: 0.85rem; font-weight: 600; }
     .container { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
     .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 1.5rem; }
     h1 { font-size: 1.5rem; margin-bottom: 1rem; }
@@ -30,9 +32,18 @@
 </head>
 <body>
   <nav>
-    <a class="brand" href="/dashboard">Mycelium</a>
-    <a href="/login">Login</a>
+    <a class="brand" href="/">Mycelium</a>
+    {% if logged-in %}
+    <a href="/dashboard">Dashboard</a>
     <a href="/users">Users</a>
+    <a href="/orders">Orders</a>
+    <span class="spacer"></span>
+    <a href="/users/{{user-id}}">Profile</a>
+    <a href="/logout">Logout</a>
+    {% else %}
+    <span class="spacer"></span>
+    <a href="/login">Login</a>
+    {% endif %}
   </nav>
   <div class="container">
     {% block content %}{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "templates/base.html" %}
+{% block title %}Order Summary — Mycelium App{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Order Summary for {{name}}</h1>
+  <dl class="dl">
+    <dt>Email</dt>
+    <dd>{{email}}</dd>
+  </dl>
+</div>
+<div class="card">
+  <h1>Orders ({{order-count}})</h1>
+  {% if orders %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Item</th>
+        <th>Amount</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for order in orders %}
+      <tr>
+        <td>{{order.id}}</td>
+        <td>{{order.item}}</td>
+        <td>${{order.amount}}</td>
+        <td>{{order.created_at}}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top: 1rem; font-weight: 600;">Total: ${{total}}</p>
+  {% else %}
+  <p>No orders found.</p>
+  {% endif %}
+</div>
+{% endblock %}

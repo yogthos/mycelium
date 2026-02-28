@@ -14,6 +14,7 @@
                       (require 'app.workflows.login :reload)
                       (require 'app.workflows.dashboard :reload)
                       (require 'app.workflows.home :reload)
+                      (require 'app.workflows.users :reload)
                       (f)))
 
 (deftest parse-request-success-test
@@ -102,33 +103,10 @@
         (is (false? (get-in result [:output :session-valid])))
         (is (= :unauthorized (:matched-dispatch result)))))))
 
-(deftest extract-session-success-test
-  (testing "extract-session reads token from query params"
-    (let [dispatches [[:success (fn [d] (:auth-token d))]
-                      [:failure (fn [d] (:error-type d))]]
-          result (dev/test-cell :auth/extract-session
-                  {:input {:http-request {:query-params {:token "tok_abc123"}}}
-                   :resources {}
-                   :dispatches dispatches})]
-      (is (:pass? result))
-      (is (= "tok_abc123" (get-in result [:output :auth-token])))
-      (is (= :success (:matched-dispatch result))))))
-
-(deftest extract-session-failure-test
-  (testing "extract-session fails when no token in query params"
-    (let [dispatches [[:success (fn [d] (:auth-token d))]
-                      [:failure (fn [d] (:error-type d))]]
-          result (dev/test-cell :auth/extract-session
-                  {:input {:http-request {:query-params {}}}
-                   :resources {}
-                   :dispatches dispatches})]
-      (is (= :failure (:matched-dispatch result)))
-      (is (= :unauthorized (get-in result [:output :error-type]))))))
-
-(deftest extract-cookie-session-success-test
+(deftest extract-cookie-session-from-cookie-test
   (testing "extract-cookie-session reads token from cookie"
     (let [dispatches [[:success (fn [d] (:auth-token d))]
-                      [:failure (fn [d] (not (:auth-token d)))]]
+                      [:failure (fn [d] (:error-type d))]]
           result (dev/test-cell :auth/extract-cookie-session
                   {:input {:http-request {:cookies {"session-token" {:value "tok_abc123"}}}}
                    :resources {}
@@ -137,15 +115,29 @@
       (is (= "tok_abc123" (get-in result [:output :auth-token])))
       (is (= :success (:matched-dispatch result))))))
 
-(deftest extract-cookie-session-failure-test
-  (testing "extract-cookie-session fails when no session cookie"
+(deftest extract-cookie-session-from-query-params-test
+  (testing "extract-cookie-session falls back to query params"
     (let [dispatches [[:success (fn [d] (:auth-token d))]
-                      [:failure (fn [d] (not (:auth-token d)))]]
+                      [:failure (fn [d] (:error-type d))]]
+          result (dev/test-cell :auth/extract-cookie-session
+                  {:input {:http-request {:cookies {}
+                                          :query-params {"token" "tok_bob456"}}}
+                   :resources {}
+                   :dispatches dispatches})]
+      (is (:pass? result))
+      (is (= "tok_bob456" (get-in result [:output :auth-token])))
+      (is (= :success (:matched-dispatch result))))))
+
+(deftest extract-cookie-session-failure-test
+  (testing "extract-cookie-session fails when no cookie or query param"
+    (let [dispatches [[:success (fn [d] (:auth-token d))]
+                      [:failure (fn [d] (:error-type d))]]
           result (dev/test-cell :auth/extract-cookie-session
                   {:input {:http-request {:cookies {}}}
                    :resources {}
                    :dispatches dispatches})]
-      (is (= :failure (:matched-dispatch result))))))
+      (is (= :failure (:matched-dispatch result)))
+      (is (= :unauthorized (get-in result [:output :error-type]))))))
 
 ;; ===== test-transitions for multi-transition cells =====
 

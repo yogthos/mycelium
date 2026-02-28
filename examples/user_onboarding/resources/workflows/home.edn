@@ -6,8 +6,7 @@
   {:id       :auth/extract-cookie-session
    :doc      "Extract auth token from session-token cookie"
    :schema   {:input  [:map
-                        [:http-request [:map
-                          [:cookies map?]]]]
+                        [:http-request [:map]]]
               :output {:success [:map
                                   [:auth-token :string]]
                        :failure [:map]}}

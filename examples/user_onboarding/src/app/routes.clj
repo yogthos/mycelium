@@ -9,14 +9,18 @@
             [app.workflows.home :as home]
             [app.workflows.login :as login]
             [app.workflows.dashboard :as dashboard]
-            [app.workflows.users :as users]))
+            [app.workflows.users :as users]
+            [app.workflows.order-summary :as order-summary]))
 
 (defn- onboarding-handler [db]
   (fn [request]
-    (let [result   (onboarding/run-onboarding db request)
-          response (:http-response result)]
-      {:status (:status response 200)
-       :body   (:body response)})))
+    (let [result (onboarding/run-onboarding db request)]
+      (if-let [response (:http-response result)]
+        {:status (:status response 200)
+         :body   (:body response)}
+        ;; Error path — render-error sets :error-status and :error-message
+        {:status (:error-status result 500)
+         :body   {:error (:error-message result "An error occurred")}}))))
 
 (defn- html-response
   "Build a Ring response from a workflow result containing :html."
@@ -33,16 +37,28 @@
     (html-response (runner-fn request))))
 
 (defn- login-submit-handler
-  "Handles login form submission. Sets session-token cookie on success."
+  "Handles login form submission. On success, sets cookie and redirects to dashboard (PRG pattern)."
   [db]
   (fn [request]
-    (let [result   (login/run-login-submit db request)
-          response (html-response result)]
-      (cond-> response
-        (and (:session-valid result) (:auth-token result))
-        (assoc :cookies {"session-token" {:value     (:auth-token result)
-                                          :path      "/"
-                                          :http-only true}})))))
+    (let [result (login/run-login-submit db request)]
+      (if (and (:session-valid result) (:auth-token result))
+        ;; Success — set cookie and redirect to dashboard
+        {:status  302
+         :headers {"Location" "/dashboard"}
+         :cookies {"session-token" {:value     (:auth-token result)
+                                    :path      "/"
+                                    :http-only true}}}
+        ;; Failure — render error page
+        (html-response result)))))
+
+(defn- logout-handler
+  "Clears session cookie and redirects to home."
+  [_request]
+  {:status  302
+   :headers {"Location" "/"}
+   :cookies {"session-token" {:value   ""
+                              :path    "/"
+                              :max-age 0}}})
 
 (defn app [db]
   (ring/ring-handler
@@ -59,10 +75,14 @@
      ["/login" {:get  {:handler (html-handler (fn [_] (login/run-login-page)))}
                 :post {:handler (login-submit-handler db)}}]
 
+     ["/logout" {:get {:handler logout-handler}}]
+
      ["/dashboard" {:get {:handler (html-handler #(dashboard/run-dashboard db %))}}]
 
-     ["/users" {:get {:handler (html-handler (fn [_] (users/run-user-list db)))}}]
+     ["/users" {:get {:handler (html-handler #(users/run-user-list db %))}}]
 
-     ["/users/:id" {:get {:handler (html-handler #(users/run-user-profile db %))}}]])
+     ["/users/:id" {:get {:handler (html-handler #(users/run-user-profile db %))}}]
+
+     ["/orders" {:get {:handler (html-handler #(order-summary/run-order-summary db %))}}]])
    (ring/create-default-handler)
    {:middleware [params/wrap-params cookies/wrap-cookies mw/wrap-errors]}))

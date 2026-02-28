@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [app.middleware :as mw]
             ;; Load cell definitions
+            [app.cells.auth]
             [app.cells.user]
             [app.cells.ui]))
 
@@ -23,8 +24,13 @@
 
 (defn run-user-list
   "Fetches all users and renders the list page."
-  [db]
-  (myc/run-workflow user-list-workflow {:db db} {} mw/workflow-opts))
+  [db request]
+  (myc/run-workflow
+   user-list-workflow
+   {:db db}
+   {:http-request {:cookies      (or (:cookies request) {})
+                   :query-params (or (:query-params request) {})}}
+   mw/workflow-opts))
 
 (defn run-user-profile
   "Fetches a single user and renders the profile page."
@@ -32,5 +38,7 @@
   (myc/run-workflow
    user-profile-workflow
    {:db db}
-   {:http-request {:path-params (:path-params request)}}
+   {:http-request {:path-params  (:path-params request)
+                   :cookies      (or (:cookies request) {})
+                   :query-params (or (:query-params request) {})}}
    mw/workflow-opts))

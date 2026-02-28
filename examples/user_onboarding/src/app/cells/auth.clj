@@ -32,22 +32,16 @@
                          :error-type     :unauthorized
                          :error-message  "Invalid or expired session token"))))})
 
-(defmethod cell/cell-spec :auth/extract-session [_]
-  {:id      :auth/extract-session
-   :doc     "Extract auth token from query parameters"
+(defmethod cell/cell-spec :auth/extract-cookie-session [_]
+  {:id      :auth/extract-cookie-session
+   :doc     "Extract auth token from session-token cookie or query params"
    :handler (fn [_resources data]
-              (let [qp    (get-in data [:http-request :query-params])
-                    token (or (get qp :token) (get qp "token"))]
+              (let [cookie-token (get-in data [:http-request :cookies "session-token" :value])
+                    qp           (get-in data [:http-request :query-params])
+                    qp-token     (or (get qp :token) (get qp "token"))
+                    token        (or cookie-token qp-token)]
                 (if token
                   (assoc data :auth-token token)
                   (assoc data
                          :error-type    :unauthorized
                          :error-message "No session token provided"))))})
-
-(defmethod cell/cell-spec :auth/extract-cookie-session [_]
-  {:id      :auth/extract-cookie-session
-   :doc     "Extract auth token from session-token cookie"
-   :handler (fn [_resources data]
-              (let [token (get-in data [:http-request :cookies "session-token" :value])]
-                (cond-> data
-                  token (assoc :auth-token token))))})

@@ -1,8 +1,34 @@
 {:id :user-profile
- :doc "Fetch a single user by ID and render their profile page"
+ :doc "Authenticate, fetch a single user by ID, and render their profile page"
 
  :cells
  {:start
+  {:id       :auth/extract-cookie-session
+   :doc      "Extract auth token from cookie or query parameters"
+   :schema   {:input  [:map
+                        [:http-request [:map]]]
+              :output {:success [:map
+                                  [:auth-token :string]]
+                       :failure [:map
+                                  [:error-type :keyword]
+                                  [:error-message :string]]}}
+   :requires []}
+
+  :validate-session
+  {:id       :auth/validate-session
+   :doc      "Check credentials against the session store"
+   :schema   {:input  [:map
+                        [:auth-token :string]]
+              :output {:authorized   [:map
+                                       [:session-valid :boolean]
+                                       [:user-id :string]]
+                       :unauthorized [:map
+                                       [:session-valid :boolean]
+                                       [:error-type :keyword]
+                                       [:error-message :string]]}}
+   :requires [:db]}
+
+  :fetch-profile-by-id
   {:id       :user/fetch-profile-by-id
    :doc      "Extract user-id from path params and fetch profile"
    :schema   {:input  [:map
@@ -38,13 +64,21 @@
    :requires []}}
 
  :edges
- {:start          {:found     :render-profile
-                   :not-found :render-error}
-  :render-profile {:done :end}
-  :render-error   {:done :end}}
+ {:start              {:success :validate-session
+                       :failure :render-error}
+  :validate-session   {:authorized   :fetch-profile-by-id
+                       :unauthorized :render-error}
+  :fetch-profile-by-id {:found     :render-profile
+                         :not-found :render-error}
+  :render-profile     {:done :end}
+  :render-error       {:done :end}}
 
  :dispatches
- {:start          [[:found     (fn [data] (:profile data))]
-                   [:not-found (fn [data] (:error-type data))]]
-  :render-profile [[:done (fn [_] true)]]
-  :render-error   [[:done (fn [_] true)]]}}
+ {:start              [[:success (fn [data] (:auth-token data))]
+                       [:failure (fn [data] (:error-type data))]]
+  :validate-session   [[:authorized   (fn [data] (:session-valid data))]
+                       [:unauthorized (fn [data] (not (:session-valid data)))]]
+  :fetch-profile-by-id [[:found     (fn [data] (:profile data))]
+                         [:not-found (fn [data] (:error-type data))]]
+  :render-profile     [[:done (fn [_] true)]]
+  :render-error       [[:done (fn [_] true)]]}}

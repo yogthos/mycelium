@@ -59,18 +59,15 @@
                               {:db *ds*}
                               {:data {:http-request
                                       {:query-params {"token" "tok_abc123"}}}})]
-      ;; The response should contain both profile and order data
-      (is (= 200 (get-in result [:http-response :status])))
-      (let [body (get-in result [:http-response :body])]
-        ;; :profile came from fetch-profile (inside the join)
-        (is (= {:name "Alice Smith" :email "alice@example.com"}
-               (:user body)))
-        ;; :orders came from fetch-orders (inside the join)
-        (is (= 2 (get-in body [:summary :order-count])))
-        (is (= 79.98 (get-in body [:summary :total])))
-        ;; Both order items present
-        (is (= #{"Widget Pro" "Gadget Max"}
-               (set (map :item (:orders body)))))))))
+      ;; The response should contain HTML
+      (is (string? (:html result)))
+      ;; :profile came from fetch-profile (inside the join)
+      (is (re-find #"Alice Smith" (:html result)))
+      ;; :orders came from fetch-orders (inside the join)
+      (is (re-find #"Widget Pro" (:html result)))
+      (is (re-find #"Gadget Max" (:html result)))
+      ;; Total should be rendered
+      (is (re-find #"79\.98" (:html result))))))
 
 (deftest fetch-orders-uses-user-id-from-validate-session-test
   (testing "fetch-orders gets :user-id produced by validate-session via join snapshot"
@@ -80,11 +77,10 @@
                               {:db *ds*}
                               {:data {:http-request
                                       {:query-params {"token" "tok_bob456"}}}})]
-      (is (= 200 (get-in result [:http-response :status])))
-      (let [body (get-in result [:http-response :body])]
-        ;; Bob has 1 order
-        (is (= 1 (get-in body [:summary :order-count])))
-        (is (= "Bob Jones" (get-in body [:user :name])))))))
+      (is (string? (:html result)))
+      ;; Bob has 1 order
+      (is (re-find #"Bob Jones" (:html result)))
+      (is (re-find #"Widget Pro" (:html result))))))
 
 ;; ---------- Schema chain validation ----------
 

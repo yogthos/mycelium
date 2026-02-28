@@ -21,5 +21,6 @@
   (myc/run-workflow
    workflow-def
    {:db db}
-   {:http-request {:query-params (or (:query-params request) {})}}
+   {:http-request {:query-params (or (:query-params request) {})
+                   :cookies      (or (:cookies request) {})}}
    mw/workflow-opts))

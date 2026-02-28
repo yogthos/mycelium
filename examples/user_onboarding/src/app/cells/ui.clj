@@ -2,6 +2,15 @@
   (:require [mycelium.cell :as cell]
             [selmer.parser :as selmer]))
 
+(defn- nav-context
+  "Builds template context for the nav bar from workflow data.
+   Uses :user-id and :session-valid from auth to determine login state."
+  [data]
+  (if (and (:user-id data) (:session-valid data))
+    {:logged-in true
+     :user-id   (:user-id data)}
+    {}))
+
 (defmethod cell/cell-spec :ui/render-home [_]
   {:id      :ui/render-home
    :doc     "Render the home page response"
@@ -25,9 +34,10 @@
               (let [{:keys [name email]} (:profile data)]
                 (assoc data
                        :html (selmer/render-file "templates/dashboard.html"
-                                                 {:name    name
-                                                  :email   email
-                                                  :user-id (:user-id data)}))))})
+                                                 (merge (nav-context data)
+                                                        {:name    name
+                                                         :email   email
+                                                         :user-id (:user-id data)})))))})
 
 (defmethod cell/cell-spec :ui/render-error [_]
   {:id      :ui/render-error
@@ -40,9 +50,10 @@
                     {:keys [status title]} (get errors error-type {:status 500 :title "Server Error"})]
                 (assoc data
                        :html (selmer/render-file "templates/error.html"
-                                                 {:status  status
-                                                  :title   title
-                                                  :message (:error-message data "An unexpected error occurred")})
+                                                 (merge (nav-context data)
+                                                        {:status  status
+                                                         :title   title
+                                                         :message (:error-message data "An unexpected error occurred")}))
                        :error-status status)))})
 
 (defmethod cell/cell-spec :ui/render-order-summary [_]
@@ -53,12 +64,13 @@
                     orders (:orders data)
                     total  (reduce + 0 (map :amount orders))]
                 (assoc data
-                       :http-response
-                       {:status 200
-                        :body   {:user    {:name name :email email}
-                                 :orders  orders
-                                 :summary {:order-count (count orders)
-                                           :total       total}}})))})
+                       :html (selmer/render-file "templates/order-summary.html"
+                                                 (merge (nav-context data)
+                                                        {:name        name
+                                                         :email       email
+                                                         :orders      orders
+                                                         :order-count (count orders)
+                                                         :total       total})))))})
 
 (defmethod cell/cell-spec :ui/render-user-list [_]
   {:id      :ui/render-user-list
@@ -66,7 +78,8 @@
    :handler (fn [_resources data]
               (assoc data
                      :html (selmer/render-file "templates/users.html"
-                                               {:users (:users data)})))})
+                                               (merge (nav-context data)
+                                                      {:users (:users data)}))))})
 
 (defmethod cell/cell-spec :ui/render-user-profile [_]
   {:id      :ui/render-user-profile
@@ -74,4 +87,6 @@
    :handler (fn [_resources data]
               (let [profile (:profile data)]
                 (assoc data
-                       :html (selmer/render-file "templates/profile.html" profile))))})
+                       :html (selmer/render-file "templates/profile.html"
+                                                 (merge (nav-context data)
+                                                        profile)))))})

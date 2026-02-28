@@ -50,25 +50,27 @@
              (get-in result [:http-response :body :profile]))))))
 
 (deftest end-to-end-unauthorized-test
-  (testing "Full workflow: invalid token → error path"
+  (testing "Full workflow: invalid token → error page"
     (let [workflow-def (manifest/manifest->workflow manifest-data)
-          compiled    (wf/compile-workflow workflow-def)]
-      (is (thrown? Exception
-            (fsm/run compiled
-                    {:db *ds*}
-                    {:data {:http-request
-                            {:headers {}
-                             :body    {"username" "alice"
-                                       "token"    "bad_token"}}}}))))))
+          compiled    (wf/compile-workflow workflow-def)
+          result      (fsm/run compiled
+                              {:db *ds*}
+                              {:data {:http-request
+                                      {:headers {}
+                                       :body    {"username" "alice"
+                                                 "token"    "bad_token"}}}})]
+      (is (string? (:html result)))
+      (is (= 401 (:error-status result))))))
 
 (deftest end-to-end-expired-token-test
-  (testing "Full workflow: expired token → error path"
+  (testing "Full workflow: expired token → error page"
     (let [workflow-def (manifest/manifest->workflow manifest-data)
-          compiled    (wf/compile-workflow workflow-def)]
-      (is (thrown? Exception
-            (fsm/run compiled
-                    {:db *ds*}
-                    {:data {:http-request
-                            {:headers {}
-                             :body    {"username" "alice"
-                                       "token"    "tok_expired"}}}}))))))
+          compiled    (wf/compile-workflow workflow-def)
+          result      (fsm/run compiled
+                              {:db *ds*}
+                              {:data {:http-request
+                                      {:headers {}
+                                       :body    {"username" "alice"
+                                                 "token"    "tok_expired"}}}})]
+      (is (string? (:html result)))
+      (is (= 401 (:error-status result))))))
