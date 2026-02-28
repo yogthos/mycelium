@@ -73,9 +73,11 @@
 
 (defn enumerate-paths
   "Enumerates all paths from :start to terminal states in a manifest.
-   Returns seq of paths, each a vector of {:cell :transition :target}."
-  [{:keys [cells edges]}]
-  (let [terminal? #{:end :error :halt}]
+   Join nodes are treated as single steps (their internal members are not expanded).
+   Returns seq of paths, each a vector of {:cell :transition :target} (with optional :join? true)."
+  [{:keys [cells edges joins]}]
+  (let [terminal?  #{:end :error :halt}
+        join-names (set (keys (or joins {})))]
     (loop [queue [[:start [] #{}]]
            paths []]
       (if (empty? queue)
@@ -91,16 +93,19 @@
 
             :else
             (let [edge-def    (get edges cell-name)
-                  new-visited (conj visited cell-name)]
+                  new-visited (conj visited cell-name)
+                  is-join?    (contains? join-names cell-name)]
               (if (keyword? edge-def)
                 ;; Unconditional — use :unconditional as transition label
-                (let [step {:cell cell-name :transition :unconditional :target edge-def}]
+                (let [step (cond-> {:cell cell-name :transition :unconditional :target edge-def}
+                             is-join? (assoc :join? true))]
                   (recur (conj (vec rest-queue)
                                [edge-def (conj path-so-far step) new-visited])
                          paths))
                 ;; Map edges
                 (let [next-items (mapv (fn [[transition target]]
-                                         (let [step {:cell cell-name :transition transition :target target}]
+                                         (let [step (cond-> {:cell cell-name :transition transition :target target}
+                                                      is-join? (assoc :join? true))]
                                            [target (conj path-so-far step) new-visited]))
                                        edge-def)]
                   (recur (into (vec rest-queue) next-items)
@@ -112,15 +117,33 @@
   (str "\"" (name kw) "\""))
 
 (defn workflow->dot
-  "Generates a DOT graph string from a manifest for visualization."
-  [{:keys [cells edges]}]
-  (let [sb (StringBuilder.)]
+  "Generates a DOT graph string from a manifest for visualization.
+   Join nodes are rendered as subgraph clusters containing their member cells."
+  [{:keys [cells edges joins]}]
+  (let [sb (StringBuilder.)
+        joins-map   (or joins {})
+        join-members (set (mapcat :cells (vals joins-map)))]
     (.append sb "digraph {\n")
     (.append sb "  rankdir=LR;\n")
     (.append sb "  node [shape=box];\n")
-    ;; Add nodes
+    ;; Add regular cell nodes (excluding join members)
     (doseq [[cell-name _cell-def] cells]
-      (.append sb (str "  " (dot-id cell-name) ";\n")))
+      (when-not (contains? join-members cell-name)
+        (.append sb (str "  " (dot-id cell-name) ";\n"))))
+    ;; Add join subgraph clusters
+    (doseq [[join-name join-def] joins-map]
+      (.append sb (str "  subgraph cluster_" (name join-name) " {\n"))
+      (.append sb (str "    label=\"" (name join-name) " (join)\";\n"))
+      (.append sb "    style=dashed;\n")
+      (.append sb "    color=blue;\n")
+      ;; The join node itself
+      (.append sb (str "    " (dot-id join-name) " [shape=diamond];\n"))
+      ;; Member cells inside the cluster
+      (doseq [member (:cells join-def)]
+        (.append sb (str "    " (dot-id member) " [shape=box style=filled fillcolor=lightyellow];\n"))
+        (.append sb (str "    " (dot-id join-name) " -> " (dot-id member) " [style=dashed];\n")))
+      (.append sb "  }\n"))
+    ;; Terminal nodes
     (.append sb "  \"end\" [shape=doublecircle];\n")
     (.append sb "  \"error\" [shape=doubleoctagon color=red];\n")
     (.append sb "  \"halt\" [shape=octagon color=orange];\n")
@@ -178,13 +201,21 @@
 (defn analyze-workflow
   "Runs Maestro's static analysis on a workflow definition.
    Returns {:reachable #{...} :unreachable #{...} :no-path-to-end #{...} :cycles [...]}
-   with state IDs reverse-resolved to cell name keywords for readability."
-  [{:keys [cells edges dispatches] :as workflow-def}]
-  (let [;; Build state->names for reverse resolution
-        state->names (into {}
-                           (map (fn [[cell-name _]]
-                                  [(wf/resolve-state-id cell-name) cell-name]))
-                           cells)
+   with state IDs reverse-resolved to cell name keywords for readability.
+   Join-aware: join names appear as regular states, join members are excluded."
+  [{:keys [cells edges dispatches joins] :as workflow-def}]
+  (let [joins-map (or joins {})
+        join-members (set (mapcat :cells (vals joins-map)))
+        ;; Build state->names for reverse resolution
+        state->names (merge
+                      (into {}
+                            (map (fn [[cell-name _]]
+                                   [(wf/resolve-state-id cell-name) cell-name]))
+                            cells)
+                      (into {}
+                            (map (fn [[join-name _]]
+                                   [(wf/resolve-state-id join-name) join-name]))
+                            joins-map))
         resolve-name (fn [sid] (get state->names sid sid))
         ;; Build the FSM spec (same as compile-workflow, minus interceptors)
         effective-dispatches (reduce (fn [acc [cell-name edge-def]]
@@ -197,18 +228,47 @@
                                         acc))
                                     (or dispatches {})
                                     edges)
-        fsm-states (into {}
-                         (map (fn [[cell-name cell-id]]
-                                (let [c        (cell/get-cell! cell-id)
-                                      state-id (wf/resolve-state-id cell-name)
-                                      edge-def (get edges cell-name)
-                                      dispatch-vec (get effective-dispatches cell-name)]
-                                  [state-id
-                                   (merge
-                                    {:handler    (:handler c)
-                                     :dispatches (wf/compile-edges edge-def dispatch-vec)}
-                                    (when (:async? c) {:async? true}))])))
-                         cells)
+        ;; Add join default dispatches (filtered to edge keys)
+        join-default-dispatches [[:failure (fn [d] (some? (:mycelium/join-error d)))]
+                                 [:done    (fn [d] (not (:mycelium/join-error d)))]]
+        effective-dispatches (reduce (fn [acc [join-name _]]
+                                      (let [edge-def (get edges join-name)]
+                                        (if (and (map? edge-def) (not (get acc join-name)))
+                                          (let [edge-keys (set (keys edge-def))
+                                                filtered (filterv (fn [[label _]]
+                                                                    (contains? edge-keys label))
+                                                                  join-default-dispatches)]
+                                            (if (seq filtered)
+                                              (assoc acc join-name filtered)
+                                              acc))
+                                          acc)))
+                                    effective-dispatches
+                                    joins-map)
+        ;; Build FSM states for non-join-member cells
+        fsm-cell-states (into {}
+                              (keep (fn [[cell-name cell-id]]
+                                      (when-not (contains? join-members cell-name)
+                                        (let [c        (cell/get-cell! cell-id)
+                                              state-id (wf/resolve-state-id cell-name)
+                                              edge-def (get edges cell-name)
+                                              dispatch-vec (get effective-dispatches cell-name)]
+                                          [state-id
+                                           (merge
+                                            {:handler    (:handler c)
+                                             :dispatches (wf/compile-edges edge-def dispatch-vec)}
+                                            (when (:async? c) {:async? true}))]))))
+                              cells)
+        ;; Build FSM states for joins (synthetic handler)
+        fsm-join-states (into {}
+                              (map (fn [[join-name _join-def]]
+                                     (let [state-id     (wf/resolve-state-id join-name)
+                                           edge-def     (get edges join-name)
+                                           dispatch-vec (get effective-dispatches join-name)]
+                                       [state-id
+                                        {:handler    (fn [_ data] data) ;; dummy for analysis
+                                         :dispatches (wf/compile-edges edge-def dispatch-vec)}])))
+                              joins-map)
+        fsm-states (merge fsm-cell-states fsm-join-states)
         spec     {:fsm fsm-states}
         analysis (fsm/analyze spec)]
     {:reachable      (set (map resolve-name (:reachable analysis)))

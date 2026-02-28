@@ -1,6 +1,7 @@
 (ns mycelium.manifest
   "Manifest loading, validation, cell-brief generation, and workflow construction."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -27,7 +28,7 @@
 
 (defn validate-manifest
   "Validates a manifest structure. Returns the manifest if valid, throws otherwise."
-  [{:keys [id cells edges dispatches] :as manifest}]
+  [{:keys [id cells edges dispatches joins] :as manifest}]
   (when-not id
     (throw (ex-info "Manifest missing :id" {:manifest manifest})))
   (when-not cells
@@ -37,15 +38,41 @@
   ;; Validate each cell definition
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
-  ;; Validate edge targets, edges exist for all cells, dispatch coverage, reachability
-  (let [cell-names (set (keys cells))]
-    (v/validate-edge-targets! edges cell-names)
+  ;; Determine join members — cells consumed by joins don't need edges
+  (let [joins-map    (or joins {})
+        join-members (set (mapcat :cells (vals joins-map)))
+        cell-names   (set (keys cells))
+        join-names   (set (keys joins-map))
+        ;; Valid edge targets include non-member cells + join names
+        edge-cell-names (set/difference cell-names join-members)
+        valid-names     (set/union edge-cell-names join-names)]
+    (v/validate-edge-targets! edges valid-names)
+    ;; Only require edge entries for non-join-member cells
     (doseq [[cell-name _] cells]
-      (when-not (get edges cell-name)
+      (when-not (or (get edges cell-name)
+                    (contains? join-members cell-name))
         (throw (ex-info (str "Cell " cell-name " has no edges defined")
                         {:cell-name cell-name}))))
-    (v/validate-dispatch-coverage! edges (or dispatches {}))
-    (v/validate-reachability! edges cell-names))
+    ;; Inject join default dispatches for join nodes with map edges
+    (let [join-default-dispatches [[:failure (fn [d] (some? (:mycelium/join-error d)))]
+                                   [:done    (fn [d] (not (:mycelium/join-error d)))]]
+          join-dispatches (reduce (fn [acc [join-name _]]
+                                    (let [edge-def (get edges join-name)]
+                                      (if (and (map? edge-def)
+                                               (not (get (or dispatches {}) join-name)))
+                                        (let [edge-keys (set (keys edge-def))
+                                              filtered  (filterv (fn [[label _]]
+                                                                   (contains? edge-keys label))
+                                                                 join-default-dispatches)]
+                                          (if (seq filtered)
+                                            (assoc acc join-name filtered)
+                                            acc))
+                                        acc)))
+                                  {}
+                                  joins-map)
+          effective-dispatches (merge join-dispatches (or dispatches {}))]
+      (v/validate-dispatch-coverage! edges effective-dispatches))
+    (v/validate-reachability! edges valid-names))
   manifest)
 
 ;; ===== Manifest loading =====
@@ -171,4 +198,5 @@
                        cells)]
     (cond-> {:cells cell-ids
              :edges edges}
-      dispatches (assoc :dispatches dispatches))))
+      dispatches (assoc :dispatches dispatches)
+      (:joins manifest) (assoc :joins (:joins manifest)))))
