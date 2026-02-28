@@ -6,6 +6,9 @@
             [mycelium.workflow :as workflow]
             [mycelium.compose :as compose]
             [mycelium.manifest :as manifest]
+            [mycelium.system :as sys]
+            [mycelium.validation :as v]
+            [malli.core :as m]
             [maestro.core :as fsm]))
 
 ;; --- Cell registry ---
@@ -41,6 +44,21 @@
    See mycelium.manifest/cell-brief."
   manifest/cell-brief)
 
+;; --- Input schema validation ---
+
+(defn- validate-input-schema
+  "Validates initial-data against workflow's :input-schema.
+   Returns nil if valid or no schema, or an error map on failure."
+  [workflow-def initial-data]
+  (when-let [input-schema (:input-schema workflow-def)]
+    (v/validate-malli-schema! input-schema "input-schema")
+    (let [schema (m/schema input-schema)
+          explanation (m/explain schema initial-data)]
+      (when explanation
+        {:schema input-schema
+         :errors (:errors explanation)
+         :data   initial-data}))))
+
 ;; --- Execution ---
 
 (defn run-workflow
@@ -58,8 +76,10 @@
   ([workflow-def resources initial-data]
    (run-workflow workflow-def resources initial-data {}))
   ([workflow-def resources initial-data opts]
-   (let [compiled (compile-workflow workflow-def opts)]
-     (fsm/run compiled resources {:data initial-data}))))
+   (if-let [input-error (validate-input-schema workflow-def initial-data)]
+     {:mycelium/input-error input-error}
+     (let [compiled (compile-workflow workflow-def opts)]
+       (fsm/run compiled resources {:data initial-data})))))
 
 (defn run-workflow-async
   "Like run-workflow but returns a future. Deref to get the final data map."
@@ -70,8 +90,17 @@
   ([workflow-def resources initial-data]
    (run-workflow-async workflow-def resources initial-data {}))
   ([workflow-def resources initial-data opts]
-   (let [compiled (compile-workflow workflow-def opts)]
-     (fsm/run-async compiled resources {:data initial-data}))))
+   (if-let [input-error (validate-input-schema workflow-def initial-data)]
+     (future {:mycelium/input-error input-error})
+     (let [compiled (compile-workflow workflow-def opts)]
+       (fsm/run-async compiled resources {:data initial-data})))))
+
+;; --- System compilation ---
+
+(def compile-system
+  "Compiles a system from a route→manifest map for bird's-eye view.
+   See mycelium.system/compile-system."
+  sys/compile-system)
 
 ;; --- Dev tools ---
 
