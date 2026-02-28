@@ -8,10 +8,11 @@ Manifests are EDN files that define complete workflows as pure data. They serve 
 {:id            :workflow-name              ;; required
  :doc           "Description"               ;; optional
  :input-schema  [:map [:http-request [:map]]] ;; optional, validates workflow input
+ :pipeline      [:start :step2 :step3]      ;; optional, shorthand for linear flows
  :fragments     {...}                       ;; optional, see workflow-fragments.md
  :cells         {...}                       ;; required
- :edges         {...}                       ;; required
- :dispatches    {...}                       ;; required (for conditional edges)
+ :edges         {...}                       ;; required (unless :pipeline used)
+ :dispatches    {...}                       ;; optional, required only for conditional edges
  :joins         {...}                       ;; optional
  :interceptors  [...]                       ;; optional
 }
@@ -27,10 +28,25 @@ Each cell in the `:cells` map must have:
   :doc      "What this cell does"   ;; optional
   :schema   {:input  [:map ...]     ;; Malli input schema
              :output [:map ...]     ;; or {:transition-label [:map ...], ...}
-            }
+            }                       ;; or :inherit — see below
   :on-error :error-cell             ;; required: target cell keyword or nil
   :requires [:db]}}                 ;; optional: resource dependencies
 ```
+
+### Schema Inheritance
+
+If a cell is already registered with a schema in the cell registry, you can use `:schema :inherit` instead of duplicating it:
+
+```clojure
+:start
+{:id       :request/parse-todo
+ :schema   :inherit           ;; pulls schema from cell registry
+ :on-error nil}
+```
+
+This looks up the cell's `:schema` from the registry via `cell/get-cell` and resolves it before validation. If the cell isn't registered or has no schema, validation throws with a clear error.
+
+This is useful when cells define their own schemas via `defmethod cell-spec` and you don't want to repeat them in the manifest.
 
 ### The `:on-error` Declaration
 
@@ -106,6 +122,68 @@ Predicates are `(fn ...)` forms evaluated by Maestro's SCI (Small Clojure Interp
 
 Available in predicates: core Clojure functions. No `require` or namespace access.
 
+## Pipeline Shorthand
+
+For simple linear workflows with no branching, use `:pipeline` instead of `:edges` and `:dispatches`:
+
+```clojure
+{:id :todo-add
+ :pipeline [:start :create :fetch-list :render]
+ :cells {:start      {:id :request/parse-todo  :schema {...} :on-error nil}
+         :create     {:id :todo/create         :schema {...} :on-error nil}
+         :fetch-list {:id :todo/list           :schema {...} :on-error nil}
+         :render     {:id :ui/render-list      :schema {...} :on-error nil}}}
+```
+
+This expands to:
+- `:edges` — each cell flows to the next: `{:start :create, :create :fetch-list, :fetch-list :render, :render :end}`
+- `:dispatches` — empty `{}`
+
+**Constraints**: `:pipeline` is mutually exclusive with `:edges`, `:dispatches`, `:fragments`, and `:joins`. Use it only for pure linear workflows.
+
+## Optional Dispatches
+
+`:dispatches` is only required when you have conditional (map) edges. If all edges are unconditional keywords (e.g., `:start :next-cell`), you can omit `:dispatches` entirely:
+
+```clojure
+{:id :simple
+ :cells {:start {:id :my/cell :schema {...} :on-error nil}}
+ :edges {:start :end}}
+;; no :dispatches needed
+```
+
+## Ring Middleware
+
+Mycelium provides `mycelium.middleware` to bridge Ring HTTP requests to workflow execution:
+
+```clojure
+(require '[mycelium.middleware :as mw])
+
+;; Create a Ring handler from a compiled workflow
+(def handler
+  (mw/workflow-handler compiled-workflow
+    {:resources {:db db}           ;; or (fn [request] {:db ...})
+     :input-fn  (fn [req] {:http-request req})  ;; default
+     :output-fn mw/html-response}))             ;; default
+
+;; html-response extracts :html from result, returns {:status 200 :body html}
+(mw/html-response {:html "<h1>Hi</h1>"})
+;; => {:status 200, :headers {"Content-Type" "text/html; charset=utf-8"}, :body "<h1>Hi</h1>"}
+```
+
+Common pattern with Reitit routes:
+
+```clojure
+(defn- wf-handler [compiled db]
+  (mw/workflow-handler compiled {:resources {:db db}}))
+
+(defn routes [db]
+  [["/"     {:get  {:handler (wf-handler compiled-page db)}}]
+   ["/add"  {:post {:handler (wf-handler compiled-add db)}}]])
+```
+
+`workflow-handler` also handles input validation errors — if the workflow returns `:mycelium/input-error`, a 400 response is returned automatically.
+
 ## Cell Briefs (for LLM Agents)
 
 Generate a self-contained prompt for implementing a single cell:
@@ -127,8 +205,9 @@ The `:prompt` string contains everything an LLM needs to implement the cell: sch
 `validate-manifest` checks:
 - `:id` is present
 - `:cells` is present and non-empty
-- `:edges` is present
-- Every cell has valid `:id`, `:schema` (with `:input` and `:output`), and `:on-error`
+- `:edges` is present (or `:pipeline` which expands to `:edges`)
+- Every cell has valid `:id`, `:schema` (with `:input` and `:output`, or `:inherit`), and `:on-error`
+- `:schema :inherit` cells have a registered cell with a schema in the registry
 - `:on-error` targets exist in `:cells`
 - All edge targets point to valid cells, joins, or terminal states (`:end`, `:error`, `:halt`)
 - Every non-join-member cell has an edge entry

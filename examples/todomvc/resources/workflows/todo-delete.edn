@@ -27,6 +27,4 @@
 
  :edges
  {:start  :delete
-  :delete :fetch-list}
-
- :dispatches {}}
+  :delete :fetch-list}}

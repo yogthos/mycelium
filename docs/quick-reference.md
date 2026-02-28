@@ -50,6 +50,17 @@
  :interceptors [{:id :x :scope :all :pre (fn [d] d)}]}           ;; optional
 ```
 
+### Pipeline Shorthand (Manifests)
+
+```clojure
+;; Instead of :edges + :dispatches for linear flows:
+{:id :my-pipeline
+ :pipeline [:start :process :render]
+ :cells {:start   {...} :process {...} :render {...}}}
+;; Expands to :edges {:start :process, :process :render, :render :end}
+;; Mutually exclusive with :edges, :dispatches, :fragments, :joins
+```
+
 ## Manifest Loading
 
 ```clojure
@@ -136,12 +147,30 @@ Default dispatches `:success` / `:failure` are provided automatically based on `
          :failure [:map [:error :string]]}
 ```
 
+## Ring Middleware
+
+```clojure
+(require '[mycelium.middleware :as mw])
+
+;; Create a Ring handler from a pre-compiled workflow
+(mw/workflow-handler compiled {:resources {:db db}})
+
+;; With custom input/output transforms
+(mw/workflow-handler compiled
+  {:resources {:db db}
+   :input-fn  (fn [req] {:http-request req})   ;; default
+   :output-fn mw/html-response})               ;; default
+
+;; Standard HTML response helper
+(mw/html-response result)  ;; => {:status 200 :body (:html result) ...}
+```
+
 ## Manifest Cell Required Fields
 
 ```clojure
 {:id       :namespace/name    ;; cell registry ID
  :schema   {:input  [...]     ;; Malli schema
-            :output [...]}    ;; single or per-transition
+            :output [...]}    ;; single or per-transition — or :inherit
  :on-error :cell-name}        ;; or nil — required in strict mode (default)
 ```
 

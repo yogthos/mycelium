@@ -1,6 +1,7 @@
 (ns mycelium.manifest-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [mycelium.cell :as cell]
+            [mycelium.core :as myc]
             [mycelium.manifest :as manifest]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
@@ -233,3 +234,180 @@
     (let [wf-def (manifest/manifest->workflow join-manifest)]
       (is (contains? wf-def :joins))
       (is (contains? (:joins wf-def) :fetch-data)))))
+
+;; ===== :schema :inherit =====
+
+(deftest schema-inherit-resolves-from-registry-test
+  (testing ":schema :inherit resolves schema from cell registry"
+    (defmethod cell/cell-spec :test/inherit-cell [_]
+      {:id      :test/inherit-cell
+       :handler (fn [_ data] data)
+       :schema  {:input  [:map [:x :int]]
+                 :output [:map [:y :int]]}})
+    (let [m {:id :test/inherit
+             :cells {:start {:id       :test/inherit-cell
+                              :schema   :inherit
+                              :on-error nil}}
+             :edges {:start :end}}
+          result (manifest/validate-manifest m)]
+      ;; Schema should be resolved from registry
+      (is (= [:map [:x :int]] (get-in result [:cells :start :schema :input])))
+      (is (= [:map [:y :int]] (get-in result [:cells :start :schema :output]))))))
+
+(deftest schema-inherit-unregistered-cell-throws-test
+  (testing ":schema :inherit for unregistered cell throws"
+    (let [m {:id :test/inherit-bad
+             :cells {:start {:id       :test/nonexistent-cell
+                              :schema   :inherit
+                              :on-error nil}}
+             :edges {:start :end}}]
+      (is (thrown-with-msg? Exception #"not registered"
+            (manifest/validate-manifest m))))))
+
+(deftest schema-inherit-no-schema-in-registry-throws-test
+  (testing ":schema :inherit throws when registered cell has no schema"
+    (defmethod cell/cell-spec :test/no-schema-cell [_]
+      {:id      :test/no-schema-cell
+       :handler (fn [_ data] data)})
+    (let [m {:id :test/inherit-no-schema
+             :cells {:start {:id       :test/no-schema-cell
+                              :schema   :inherit
+                              :on-error nil}}
+             :edges {:start :end}}]
+      (is (thrown-with-msg? Exception #"no schema"
+            (manifest/validate-manifest m))))))
+
+(deftest schema-inherit-in-manifest-to-workflow-test
+  (testing ":schema :inherit works end-to-end with manifest->workflow"
+    (defmethod cell/cell-spec :test/inherit-e2e [_]
+      {:id      :test/inherit-e2e
+       :handler (fn [_ data] (assoc data :y (* 2 (:x data))))
+       :schema  {:input  [:map [:x :int]]
+                 :output [:map [:y :int]]}})
+    (let [m {:id :test/inherit-e2e-wf
+             :cells {:start {:id       :test/inherit-e2e
+                              :schema   :inherit
+                              :on-error nil}}
+             :edges {:start :end}}
+          wf-def (manifest/manifest->workflow m)]
+      ;; Cell should be usable
+      (is (some? (cell/get-cell :test/inherit-e2e))))))
+
+;; ===== Pipeline shorthand =====
+
+(deftest pipeline-basic-test
+  (testing "Pipeline shorthand expands to correct edges"
+    (let [m {:id :test/pipeline
+             :pipeline [:start :process :render]
+             :cells {:start   {:id :test/p-start
+                                :schema {:input [:map] :output [:map [:x :int]]}
+                                :on-error nil}
+                     :process {:id :test/p-process
+                                :schema {:input [:map [:x :int]] :output [:map [:y :int]]}
+                                :on-error nil}
+                     :render  {:id :test/p-render
+                                :schema {:input [:map [:y :int]] :output [:map [:html :string]]}
+                                :on-error nil}}}
+          result (manifest/validate-manifest m)]
+      ;; Pipeline should be removed, edges generated
+      (is (nil? (:pipeline result)))
+      (is (= :process (get-in result [:edges :start])))
+      (is (= :render  (get-in result [:edges :process])))
+      (is (= :end     (get-in result [:edges :render]))))))
+
+(deftest pipeline-single-cell-test
+  (testing "Pipeline with single cell works"
+    (let [m {:id :test/pipeline-single
+             :pipeline [:start]
+             :cells {:start {:id :test/ps-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}}
+          result (manifest/validate-manifest m)]
+      (is (= :end (get-in result [:edges :start]))))))
+
+(deftest pipeline-with-edges-throws-test
+  (testing "Pipeline with :edges throws"
+    (let [m {:id :test/pipeline-conflict
+             :pipeline [:start]
+             :cells {:start {:id :test/pc-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}
+             :edges {:start :end}}]
+      (is (thrown-with-msg? Exception #"mutually exclusive"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-with-dispatches-throws-test
+  (testing "Pipeline with :dispatches throws"
+    (let [m {:id :test/pipeline-disp
+             :pipeline [:start]
+             :cells {:start {:id :test/pd-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}
+             :dispatches {}}]
+      (is (thrown-with-msg? Exception #"mutually exclusive"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-with-fragments-throws-test
+  (testing "Pipeline with :fragments throws"
+    (let [m {:id :test/pipeline-frag
+             :pipeline [:start]
+             :cells {:start {:id :test/pf-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}
+             :fragments {:f {}}}]
+      (is (thrown-with-msg? Exception #"mutually exclusive"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-with-joins-throws-test
+  (testing "Pipeline with :joins throws"
+    (let [m {:id :test/pipeline-join
+             :pipeline [:start]
+             :cells {:start {:id :test/pj-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}
+             :joins {:j {:cells [:start]}}}]
+      (is (thrown-with-msg? Exception #"mutually exclusive"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-unknown-cell-throws-test
+  (testing "Pipeline referencing unknown cell throws"
+    (let [m {:id :test/pipeline-unknown
+             :pipeline [:start :nonexistent]
+             :cells {:start {:id :test/pu-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}}]
+      (is (thrown-with-msg? Exception #"not in :cells"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-empty-throws-test
+  (testing "Empty pipeline throws"
+    (let [m {:id :test/pipeline-empty
+             :pipeline []
+             :cells {:start {:id :test/pe-start
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}}]
+      (is (thrown-with-msg? Exception #"at least 1"
+            (manifest/validate-manifest m))))))
+
+(deftest pipeline-e2e-run-test
+  (testing "Pipeline manifest compiles and runs end-to-end"
+    (defmethod cell/cell-spec :test/pipe-double [_]
+      {:id      :test/pipe-double
+       :handler (fn [_ data] (assoc data :y (* 2 (:x data))))
+       :schema  {:input [:map [:x :int]] :output [:map [:y :int]]}})
+    (defmethod cell/cell-spec :test/pipe-format [_]
+      {:id      :test/pipe-format
+       :handler (fn [_ data] (assoc data :result (str "val=" (:y data))))
+       :schema  {:input [:map [:y :int]] :output [:map [:result :string]]}})
+    (let [m {:id :test/pipeline-e2e
+             :pipeline [:start :format]
+             :cells {:start  {:id :test/pipe-double
+                               :schema {:input [:map [:x :int]] :output [:map [:y :int]]}
+                               :on-error nil}
+                     :format {:id :test/pipe-format
+                               :schema {:input [:map [:y :int]] :output [:map [:result :string]]}
+                               :on-error nil}}}
+          validated (manifest/validate-manifest m)
+          wf-def   (manifest/manifest->workflow validated)
+          result   (myc/run-workflow wf-def {} {:x 21})]
+      (is (= "val=42" (:result result))))))

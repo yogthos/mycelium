@@ -27,6 +27,4 @@
 
  :edges
  {:start  :toggle
-  :toggle :fetch-list}
-
- :dispatches {}}
+  :toggle :fetch-list}}

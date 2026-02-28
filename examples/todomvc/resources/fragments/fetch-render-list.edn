@@ -38,6 +38,4 @@
  :edges
  {:fetch-list  :fetch-stats
   :fetch-stats :render-list
-  :render-list :_exit/done}
-
- :dispatches {}}
+  :render-list :_exit/done}}
