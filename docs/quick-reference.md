@@ -95,16 +95,24 @@
 (sys/system->dot system)                ;; => DOT graph string
 ```
 
-## Compose (Nested Workflows)
+## Subworkflows (Nested Composition)
+
+Wrap a workflow as a single opaque cell. See [subworkflows.md](subworkflows.md).
 
 ```clojure
 (require '[mycelium.compose :as compose])
 
+;; Register a workflow as a reusable cell
 (compose/register-workflow-cell!
-  :auth/flow
+  :payment/flow
   {:cells {...} :edges {...} :dispatches {...}}
   {:input [:map ...] :output [:map ...]})
+
+;; Or create spec without registering
+(compose/workflow->cell :payment/flow workflow-def schema)
 ```
+
+Default dispatches `:success` / `:failure` are provided automatically based on `:mycelium/error`.
 
 ## Edge Targets
 
