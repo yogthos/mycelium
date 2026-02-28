@@ -169,3 +169,5 @@ Fragment validation checks:
 - Multiple fragments can be used in the same manifest as long as cell names don't collide
 - Fragments cannot contain `:joins` (keep join workflows as standalone manifests)
 - Fragment dispatch predicates in EDN use `(fn ...)` forms, same as manifests
+- `:dispatches` can be omitted from fragments (and host manifests) when all edges are unconditional keywords
+- Fragment cells support `:schema :inherit` to pull schemas from the cell registry instead of duplicating them

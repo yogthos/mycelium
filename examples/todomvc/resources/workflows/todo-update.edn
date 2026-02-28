@@ -27,6 +27,4 @@
 
  :edges
  {:start        :update-title
-  :update-title :fetch-list}
-
- :dispatches {}}
+  :update-title :fetch-list}}

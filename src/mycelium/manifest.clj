@@ -12,18 +12,79 @@
 ;; ===== Cell definition validation =====
 
 (defn- validate-cell-def!
-  "Validates a single cell definition within a manifest."
+  "Validates a single cell definition within a manifest.
+   Skips schema validation for :schema :inherit (resolved separately)."
   [cell-name cell-def]
   (when-not (:id cell-def)
     (throw (ex-info (str "Cell " cell-name " missing :id") {:cell-name cell-name})))
   (when-not (:schema cell-def)
     (throw (ex-info (str "Cell " cell-name " missing :schema") {:cell-name cell-name})))
-  (when-not (get-in cell-def [:schema :input])
-    (throw (ex-info (str "Cell " cell-name " missing :schema :input") {:cell-name cell-name})))
-  (when-not (get-in cell-def [:schema :output])
-    (throw (ex-info (str "Cell " cell-name " missing :schema :output") {:cell-name cell-name})))
-  (v/validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
-  (v/validate-output-schema! (get-in cell-def [:schema :output]) (str cell-name " :output")))
+  (when-not (= :inherit (:schema cell-def))
+    (when-not (get-in cell-def [:schema :input])
+      (throw (ex-info (str "Cell " cell-name " missing :schema :input") {:cell-name cell-name})))
+    (when-not (get-in cell-def [:schema :output])
+      (throw (ex-info (str "Cell " cell-name " missing :schema :output") {:cell-name cell-name})))
+    (v/validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
+    (v/validate-output-schema! (get-in cell-def [:schema :output]) (str cell-name " :output"))))
+
+(defn- resolve-inherit-schemas
+  "Resolves :schema :inherit in cell definitions by looking up schemas from cell registry."
+  [cells]
+  (into {}
+    (map (fn [[cell-name cell-def]]
+           (if (= :inherit (:schema cell-def))
+             (let [cell-id (:id cell-def)
+                   cell (cell/get-cell cell-id)]
+               (when-not cell
+                 (throw (ex-info (str "Cell " cell-name " has :schema :inherit but "
+                                      cell-id " is not registered")
+                                 {:cell-name cell-name :cell-id cell-id})))
+               (when-not (:schema cell)
+                 (throw (ex-info (str "Cell " cell-name " has :schema :inherit but "
+                                      cell-id " has no schema in registry")
+                                 {:cell-name cell-name :cell-id cell-id})))
+               [cell-name (assoc cell-def :schema (:schema cell))])
+             [cell-name cell-def])))
+    cells))
+
+;; ===== Pipeline expansion =====
+
+(defn- expand-pipeline
+  "Expands a :pipeline vector into :edges and :dispatches.
+   Pipeline is mutually exclusive with :edges, :dispatches, :fragments, and :joins."
+  [{:keys [pipeline cells edges dispatches fragments joins] :as manifest}]
+  (if-not pipeline
+    manifest
+    (do
+      (when edges
+        (throw (ex-info ":pipeline is mutually exclusive with :edges"
+                        {:id (:id manifest)})))
+      (when dispatches
+        (throw (ex-info ":pipeline is mutually exclusive with :dispatches"
+                        {:id (:id manifest)})))
+      (when fragments
+        (throw (ex-info ":pipeline is mutually exclusive with :fragments"
+                        {:id (:id manifest)})))
+      (when joins
+        (throw (ex-info ":pipeline is mutually exclusive with :joins"
+                        {:id (:id manifest)})))
+      (when (empty? pipeline)
+        (throw (ex-info ":pipeline must have at least 1 element"
+                        {:id (:id manifest)})))
+      (let [cell-names (set (keys cells))]
+        (doseq [cell-name pipeline]
+          (when-not (contains? cell-names cell-name)
+            (throw (ex-info (str "Pipeline references " cell-name " which is not in :cells")
+                            {:id (:id manifest) :pipeline-ref cell-name
+                             :valid-cells cell-names})))))
+      (let [pairs (partition 2 1 pipeline)
+            edges (into {} (concat
+                            (map (fn [[from to]] [from to]) pairs)
+                            [[(last pipeline) :end]]))]
+        (-> manifest
+            (dissoc :pipeline)
+            (assoc :edges edges
+                   :dispatches {}))))))
 
 ;; ===== Manifest validation =====
 
@@ -54,57 +115,61 @@
      :strict? — if true (default), requires :on-error on every cell.
                 Set to false to allow missing :on-error (legacy mode)."
   ([manifest] (validate-manifest manifest {:strict? true}))
-  ([{:keys [id cells edges dispatches joins] :as manifest} opts]
-  (when-not id
-    (throw (ex-info "Manifest missing :id" {:manifest manifest})))
-  (when-not cells
-    (throw (ex-info "Manifest missing :cells" {:id id})))
-  (when-not edges
-    (throw (ex-info "Manifest missing :edges" {:id id})))
-  ;; Validate each cell definition
-  (doseq [[cell-name cell-def] cells]
-    (validate-cell-def! cell-name cell-def))
-  ;; Validate :on-error declarations
-  (validate-on-error! cells (:strict? opts))
-  ;; Determine join members — cells consumed by joins don't need edges
-  (let [joins-map    (or joins {})
-        join-members (set (mapcat :cells (vals joins-map)))
-        cell-names   (set (keys cells))
-        join-names   (set (keys joins-map))
-        ;; Valid edge targets include non-member cells + join names
-        edge-cell-names (set/difference cell-names join-members)
-        valid-names     (set/union edge-cell-names join-names)]
-    (v/validate-edge-targets! edges valid-names)
-    ;; Only require edge entries for non-join-member cells
-    (doseq [[cell-name _] cells]
-      (when-not (or (get edges cell-name)
-                    (contains? join-members cell-name))
-        (throw (ex-info (str "Cell " cell-name " has no edges defined")
-                        {:cell-name cell-name}))))
-    ;; Inject join default dispatches for join nodes with map edges
-    (let [join-default-dispatches [[:failure (fn [d] (some? (:mycelium/join-error d)))]
-                                   [:done    (fn [d] (not (:mycelium/join-error d)))]]
-          join-dispatches (reduce (fn [acc [join-name _]]
-                                    (let [edge-def (get edges join-name)]
-                                      (if (and (map? edge-def)
-                                               (not (get (or dispatches {}) join-name)))
-                                        (let [edge-keys (set (keys edge-def))
-                                              filtered  (filterv (fn [[label _]]
-                                                                   (contains? edge-keys label))
-                                                                 join-default-dispatches)]
-                                          (if (seq filtered)
-                                            (assoc acc join-name filtered)
-                                            acc))
-                                        acc)))
-                                  {}
-                                  joins-map)
-          effective-dispatches (merge join-dispatches (or dispatches {}))]
-      (v/validate-dispatch-coverage! edges effective-dispatches))
-    (v/validate-reachability! edges valid-names))
-  ;; Validate :input-schema if present
-  (when-let [input-schema (:input-schema manifest)]
-    (v/validate-malli-schema! input-schema "input-schema"))
-  manifest))
+  ([manifest opts]
+   (let [{:keys [id cells edges dispatches joins] :as manifest} (expand-pipeline manifest)]
+     (when-not id
+       (throw (ex-info "Manifest missing :id" {:manifest manifest})))
+     (when-not cells
+       (throw (ex-info "Manifest missing :cells" {:id id})))
+     (when-not edges
+       (throw (ex-info "Manifest missing :edges" {:id id})))
+     ;; Resolve :schema :inherit before validation
+     (let [cells    (resolve-inherit-schemas cells)
+           manifest (assoc manifest :cells cells)]
+       ;; Validate each cell definition
+       (doseq [[cell-name cell-def] cells]
+         (validate-cell-def! cell-name cell-def))
+       ;; Validate :on-error declarations
+       (validate-on-error! cells (:strict? opts))
+       ;; Determine join members — cells consumed by joins don't need edges
+       (let [joins-map    (or joins {})
+             join-members (set (mapcat :cells (vals joins-map)))
+             cell-names   (set (keys cells))
+             join-names   (set (keys joins-map))
+             ;; Valid edge targets include non-member cells + join names
+             edge-cell-names (set/difference cell-names join-members)
+             valid-names     (set/union edge-cell-names join-names)]
+         (v/validate-edge-targets! edges valid-names)
+         ;; Only require edge entries for non-join-member cells
+         (doseq [[cell-name _] cells]
+           (when-not (or (get edges cell-name)
+                         (contains? join-members cell-name))
+             (throw (ex-info (str "Cell " cell-name " has no edges defined")
+                             {:cell-name cell-name}))))
+         ;; Inject join default dispatches for join nodes with map edges
+         (let [join-default-dispatches [[:failure (fn [d] (some? (:mycelium/join-error d)))]
+                                        [:done    (fn [d] (not (:mycelium/join-error d)))]]
+               join-dispatches (reduce (fn [acc [join-name _]]
+                                         (let [edge-def (get edges join-name)]
+                                           (if (and (map? edge-def)
+                                                    (not (get (or dispatches {}) join-name)))
+                                             (let [edge-keys (set (keys edge-def))
+                                                   filtered  (filterv (fn [[label _]]
+                                                                        (contains? edge-keys label))
+                                                                      join-default-dispatches)]
+                                               (if (seq filtered)
+                                                 (assoc acc join-name filtered)
+                                                 acc))
+                                             acc)))
+                                       {}
+                                       joins-map)
+               effective-dispatches (merge join-dispatches (or dispatches {}))]
+           (v/validate-dispatch-coverage! edges effective-dispatches))
+         (v/validate-reachability! edges valid-names))
+       ;; Validate :input-schema if present
+       (when-let [input-schema (:input-schema manifest)]
+         (v/validate-malli-schema! input-schema "input-schema"))
+       manifest))))
 
 ;; ===== Fragment expansion =====
 
@@ -221,7 +286,8 @@
    The manifest is the single source of truth for schemas and requires.
    Returns {:cells ... :edges ... :dispatches ...} suitable for `workflow/compile-workflow`."
   [{:keys [cells edges dispatches] :as manifest}]
-  (let [cell-ids (into {}
+  (let [cells    (resolve-inherit-schemas cells)
+        cell-ids (into {}
                        (map (fn [[cell-name cell-def]]
                               (let [{:keys [id schema requires]} cell-def]
                                 (if (cell/get-cell id)

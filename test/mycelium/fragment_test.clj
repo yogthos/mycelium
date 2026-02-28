@@ -361,3 +361,57 @@
       ;; :a-frag expands first (sorted), so :start comes from frag-a
       (let [expanded (first results)]
         (is (= :det/ca (get-in expanded [:cells :start :id])))))))
+
+;; ===== 17. Manifest with fragments but no :dispatches validates when all edges unconditional =====
+
+(deftest manifest-with-fragments-no-dispatches-test
+  (testing "Manifest with fragments and no :dispatches validates when all edges are unconditional"
+    (defmethod cell/cell-spec :frag-nodispatch/step [_]
+      {:id      :frag-nodispatch/step
+       :handler (fn [_ data] (assoc data :done true))
+       :schema  {:input [:map] :output [:map [:done :boolean]]}})
+    (defmethod cell/cell-spec :frag-nodispatch/end [_]
+      {:id      :frag-nodispatch/end
+       :handler (fn [_ data] (assoc data :result "ok"))
+       :schema  {:input [:map [:done :boolean]] :output [:map [:result :string]]}})
+
+    (let [frag {:id    :nodispatch-frag
+                :entry :step
+                :exits [:done]
+                :cells {:step {:id     :frag-nodispatch/step
+                               :schema {:input [:map] :output [:map [:done :boolean]]}}}
+                :edges {:step :_exit/done}}
+          host {:id    :nodispatch-host
+                :fragments {:phase {:fragment frag
+                                    :as       :start
+                                    :exits    {:done :finish}}}
+                :cells {:finish {:id     :frag-nodispatch/end
+                                 :schema {:input [:map [:done :boolean]]
+                                          :output [:map [:result :string]]}
+                                 :on-error nil}}
+                :edges {:finish :end}}
+          expanded (manifest/expand-fragments host)
+          _validated (manifest/validate-manifest expanded {:strict? false})]
+      ;; Should have no :dispatches or empty dispatches
+      (is (some? expanded))
+      (is (contains? (:cells expanded) :start))
+      (is (contains? (:cells expanded) :finish)))))
+
+;; ===== 18. Fragment cells support :schema :inherit =====
+
+(deftest fragment-schema-inherit-test
+  (testing "Fragment cell with :schema :inherit passes validation"
+    (defmethod cell/cell-spec :frag/inherit-cell [_]
+      {:id      :frag/inherit-cell
+       :handler (fn [_ data] data)
+       :schema  {:input  [:map [:x :int]]
+                 :output [:map [:y :int]]}})
+    (let [frag {:id    :inherit-frag
+                :entry :step
+                :exits [:done]
+                :cells {:step {:id     :frag/inherit-cell
+                               :schema :inherit}}
+                :edges {:step {:done :_exit/done}}
+                :dispatches {:step [[:done (constantly true)]]}}]
+      ;; Should not throw — :inherit is allowed during fragment validation
+      (is (some? (fragment/validate-fragment frag))))))

@@ -27,6 +27,4 @@
 
  :edges
  {:start  :create
-  :create :fetch-list}
-
- :dispatches {}}
+  :create :fetch-list}}

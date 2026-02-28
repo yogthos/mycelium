@@ -49,6 +49,4 @@
  :edges
  {:start      :fetch-data
   :fetch-data {:done :render-page}
-  :render-page :end}
-
- :dispatches {}}
+  :render-page :end}}

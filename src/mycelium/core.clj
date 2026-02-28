@@ -6,6 +6,7 @@
             [mycelium.workflow :as workflow]
             [mycelium.compose :as compose]
             [mycelium.manifest :as manifest]
+            [mycelium.middleware :as mw]
             [mycelium.system :as sys]
             [malli.core :as m]
             [maestro.core :as fsm]))
@@ -129,6 +130,18 @@
    (run-workflow-async workflow-def resources initial-data {}))
   ([workflow-def resources initial-data opts]
    (run-compiled-async (pre-compile workflow-def opts) resources initial-data)))
+
+;; --- Middleware ---
+
+(def workflow-handler
+  "Creates a Ring handler from a pre-compiled workflow.
+   See mycelium.middleware/workflow-handler."
+  mw/workflow-handler)
+
+(def html-response
+  "Standard HTML response from workflow result.
+   See mycelium.middleware/html-response."
+  mw/html-response)
 
 ;; --- System compilation ---
 

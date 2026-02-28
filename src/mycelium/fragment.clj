@@ -9,18 +9,20 @@
 ;; ===== Fragment validation =====
 
 (defn- validate-cell-def!
-  "Validates a single cell definition within a fragment."
+  "Validates a single cell definition within a fragment.
+   Skips schema validation for :schema :inherit (resolved separately)."
   [cell-name cell-def]
   (when-not (:id cell-def)
     (throw (ex-info (str "Fragment cell " cell-name " missing :id") {:cell-name cell-name})))
   (when-not (:schema cell-def)
     (throw (ex-info (str "Fragment cell " cell-name " missing :schema") {:cell-name cell-name})))
-  (when-not (get-in cell-def [:schema :input])
-    (throw (ex-info (str "Fragment cell " cell-name " missing :schema :input") {:cell-name cell-name})))
-  (when-not (get-in cell-def [:schema :output])
-    (throw (ex-info (str "Fragment cell " cell-name " missing :schema :output") {:cell-name cell-name})))
-  (v/validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
-  (v/validate-output-schema! (get-in cell-def [:schema :output]) (str cell-name " :output")))
+  (when-not (= :inherit (:schema cell-def))
+    (when-not (get-in cell-def [:schema :input])
+      (throw (ex-info (str "Fragment cell " cell-name " missing :schema :input") {:cell-name cell-name})))
+    (when-not (get-in cell-def [:schema :output])
+      (throw (ex-info (str "Fragment cell " cell-name " missing :schema :output") {:cell-name cell-name})))
+    (v/validate-malli-schema! (get-in cell-def [:schema :input]) (str cell-name " :input"))
+    (v/validate-output-schema! (get-in cell-def [:schema :output]) (str cell-name " :output"))))
 
 (defn validate-fragment
   "Validates a fragment definition. Returns the fragment if valid, throws otherwise.
@@ -176,7 +178,6 @@
                                  (update :edges merge (:edges expansion))
                                  (update :dispatches merge (:dispatches expansion)))))
                          (-> manifest
-                             (dissoc :fragments)
-                             (update :dispatches #(or % {})))
+                             (dissoc :fragments))
                          (sort-by first fragments))]
       result)))

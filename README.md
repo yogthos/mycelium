@@ -557,6 +557,7 @@ mycelium/
 │   ├── workflow.clj      ;; DSL → Maestro compiler
 │   ├── compose.clj       ;; Hierarchical workflow nesting
 │   ├── manifest.clj      ;; EDN manifest loading, cell briefs
+│   ├── middleware.clj     ;; Ring middleware for workflow execution
 │   ├── dev.clj           ;; Testing harness, visualization
 │   ├── orchestrate.clj   ;; Agent orchestration helpers
 │   └── core.clj          ;; Public API

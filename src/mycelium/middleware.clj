@@ -1,0 +1,59 @@
+(ns mycelium.middleware
+  "Ring middleware and handlers for bridging HTTP requests to Mycelium workflows."
+  (:require [malli.core :as m]
+            [maestro.core :as fsm]))
+
+(defn html-response
+  "Standard HTML response from workflow result. Extracts :html key."
+  [result]
+  (if (:html result)
+    {:status  200
+     :headers {"Content-Type" "text/html; charset=utf-8"}
+     :body    (:html result)}
+    {:status  500
+     :headers {"Content-Type" "text/plain"}
+     :body    "Workflow produced no :html key"}))
+
+(defn- run-compiled
+  "Runs a pre-compiled workflow. Inlined to avoid cyclic dependency on mycelium.core."
+  [{:keys [compiled-fsm input-schema-raw input-schema-compiled]} resources initial-data]
+  (if-let [input-error (when input-schema-compiled
+                         (when-let [explanation (m/explain input-schema-compiled initial-data)]
+                           {:schema input-schema-raw
+                            :errors (:errors explanation)
+                            :data   initial-data}))]
+    {:mycelium/input-error input-error}
+    (fsm/run compiled-fsm resources {:data initial-data})))
+
+(defn workflow-handler
+  "Creates a Ring handler from a pre-compiled workflow.
+   Options:
+     :resources — resources map or (fn [request] resources-map)
+     :input-fn  — (fn [request] initial-data), default: (fn [req] {:http-request req})
+     :output-fn — (fn [workflow-result] ring-response), default: html-response"
+  [compiled {:keys [resources input-fn output-fn]
+             :or   {input-fn  (fn [req] {:http-request req})
+                    output-fn html-response}}]
+  (let [resources-fn (if (fn? resources) resources (constantly resources))]
+    (fn [request]
+      (let [res    (resources-fn request)
+            input  (input-fn request)
+            result (run-compiled compiled res input)]
+        (if (:mycelium/input-error result)
+          {:status  400
+           :headers {"Content-Type" "text/plain"}
+           :body    (str "Input validation failed: "
+                         (pr-str (:mycelium/input-error result)))}
+          (output-fn result))))))
+
+(defn wrap-workflow
+  "Ring middleware that runs a pre-compiled workflow for each request.
+   Options:
+     :compiled  — pre-compiled workflow (from myc/pre-compile)
+     :resources — resources map or (fn [request] resources-map)
+     :input-fn  — (fn [request] initial-data), default: (fn [req] {:http-request req})
+     :output-fn — (fn [workflow-result] ring-response), default: html-response"
+  [handler {:keys [compiled] :as opts}]
+  (let [wf-handler (workflow-handler compiled (dissoc opts :compiled))]
+    (fn [request]
+      (wf-handler request))))
