@@ -169,3 +169,58 @@
                               :schema {:input [:map] :output [:map]}}}
              :edges {:start :end}}]
       (is (some? (manifest/validate-manifest m))))))
+
+;; ===== Bug fix: manifest join dispatch validation =====
+
+(def join-manifest
+  {:id :test/join-workflow
+   :doc "A workflow with a join node"
+   :cells {:start
+           {:id       :test/jm-start
+            :doc      "Start"
+            :schema   {:input  [:map [:x :int]]
+                       :output {:success [:map [:user-id :string]]
+                                :failure [:map [:error :string]]}}
+            :requires []}
+           :fetch-a
+           {:id       :test/jm-fetch-a
+            :doc      "Fetch A"
+            :schema   {:input  [:map [:user-id :string]]
+                       :output [:map [:profile [:map [:name :string]]]]}
+            :requires []}
+           :fetch-b
+           {:id       :test/jm-fetch-b
+            :doc      "Fetch B"
+            :schema   {:input  [:map [:user-id :string]]
+                       :output [:map [:orders [:vector :map]]]}
+            :requires []}
+           :render
+           {:id       :test/jm-render
+            :doc      "Render"
+            :schema   {:input  [:map
+                                [:profile [:map [:name :string]]]
+                                [:orders [:vector :map]]]
+                       :output [:map [:html :string]]}
+            :requires []}}
+   :joins {:fetch-data {:cells    [:fetch-a :fetch-b]
+                        :strategy :parallel}}
+   :edges {:start      {:success :fetch-data
+                        :failure :error}
+           :fetch-data {:done :render
+                        :failure :error}
+           :render     {:done :end}}
+   ;; Note: NO dispatch entry for :fetch-data — should use join defaults
+   :dispatches {:start  [[:success (fn [d] (:user-id d))]
+                         [:failure (fn [d] (:error d))]]
+                :render [[:done (constantly true)]]}})
+
+(deftest manifest-join-validates-without-explicit-dispatch-test
+  (testing "Manifest with join node validates even without explicit dispatch for join"
+    (let [result (manifest/validate-manifest join-manifest)]
+      (is (= :test/join-workflow (:id result))))))
+
+(deftest manifest-join-to-workflow-produces-compilable-def-test
+  (testing "manifest->workflow with joins produces a workflow def with :joins key"
+    (let [wf-def (manifest/manifest->workflow join-manifest)]
+      (is (contains? wf-def :joins))
+      (is (contains? (:joins wf-def) :fetch-data)))))

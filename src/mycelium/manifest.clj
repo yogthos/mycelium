@@ -1,6 +1,7 @@
 (ns mycelium.manifest
   "Manifest loading, validation, cell-brief generation, and workflow construction."
   (:require [clojure.edn :as edn]
+            [clojure.set :as set]
             [clojure.string :as str]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -38,12 +39,13 @@
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
   ;; Determine join members — cells consumed by joins don't need edges
-  (let [join-members (set (mapcat :cells (vals (or joins {}))))
+  (let [joins-map    (or joins {})
+        join-members (set (mapcat :cells (vals joins-map)))
         cell-names   (set (keys cells))
-        join-names   (set (keys (or joins {})))
+        join-names   (set (keys joins-map))
         ;; Valid edge targets include non-member cells + join names
-        edge-cell-names (clojure.set/difference cell-names join-members)
-        valid-names     (clojure.set/union edge-cell-names join-names)]
+        edge-cell-names (set/difference cell-names join-members)
+        valid-names     (set/union edge-cell-names join-names)]
     (v/validate-edge-targets! edges valid-names)
     ;; Only require edge entries for non-join-member cells
     (doseq [[cell-name _] cells]
@@ -51,7 +53,25 @@
                     (contains? join-members cell-name))
         (throw (ex-info (str "Cell " cell-name " has no edges defined")
                         {:cell-name cell-name}))))
-    (v/validate-dispatch-coverage! edges (or dispatches {}))
+    ;; Inject join default dispatches for join nodes with map edges
+    (let [join-default-dispatches [[:failure (fn [d] (some? (:mycelium/join-error d)))]
+                                   [:done    (fn [d] (not (:mycelium/join-error d)))]]
+          join-dispatches (reduce (fn [acc [join-name _]]
+                                    (let [edge-def (get edges join-name)]
+                                      (if (and (map? edge-def)
+                                               (not (get (or dispatches {}) join-name)))
+                                        (let [edge-keys (set (keys edge-def))
+                                              filtered  (filterv (fn [[label _]]
+                                                                   (contains? edge-keys label))
+                                                                 join-default-dispatches)]
+                                          (if (seq filtered)
+                                            (assoc acc join-name filtered)
+                                            acc))
+                                        acc)))
+                                  {}
+                                  joins-map)
+          effective-dispatches (merge join-dispatches (or dispatches {}))]
+      (v/validate-dispatch-coverage! edges effective-dispatches))
     (v/validate-reachability! edges valid-names))
   manifest)
 

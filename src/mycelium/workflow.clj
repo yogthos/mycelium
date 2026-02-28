@@ -104,6 +104,15 @@
       (when (seq collisions)
         (throw (ex-info (str "Join name collision with cell names: " collisions)
                         {:collisions collisions}))))
+    ;; Check no cell appears in multiple joins
+    (let [seen (atom {})]
+      (doseq [[join-name join-def] joins
+              member (:cells join-def)]
+        (if-let [other-join (get @seen member)]
+          (throw (ex-info (str "Cell " member " is member of multiple joins: "
+                               other-join " and " join-name)
+                          {:cell member :joins [other-join join-name]}))
+          (swap! seen assoc member join-name))))
     (doseq [[join-name join-def] joins]
       (let [member-cells (:cells join-def)
             strategy     (:strategy join-def :parallel)]
@@ -165,22 +174,29 @@
 
 ;; ===== Join handler construction =====
 
+(def ^:private default-async-timeout-ms
+  "Default timeout in ms for async cell invocations within joins."
+  30000)
+
 (defn- invoke-cell-handler
   "Invokes a cell handler, handling both sync and async cells.
-   Returns the result data map (blocking for async cells)."
-  [cell resources data]
-  (if (:async? cell)
-    (let [p (promise)]
-      ((:handler cell) resources data
-       (fn [result] (deliver p {:ok result}))
-       (fn [error]  (deliver p {:error error})))
-      (let [v (deref p 30000 {:error (ex-info "Async cell timed out" {:cell-id (:id cell)})})]
-        (if (:error v)
-          (throw (if (instance? Throwable (:error v))
-                   (:error v)
-                   (ex-info (str (:error v)) {:cell-id (:id cell)})))
-          (:ok v))))
-    ((:handler cell) resources data)))
+   Returns the result data map (blocking for async cells).
+   `timeout-ms` overrides the default async timeout."
+  ([cell resources data]
+   (invoke-cell-handler cell resources data default-async-timeout-ms))
+  ([cell resources data timeout-ms]
+   (if (:async? cell)
+     (let [p (promise)]
+       ((:handler cell) resources data
+        (fn [result] (deliver p {:ok result}))
+        (fn [error]  (deliver p {:error error})))
+       (let [v (deref p timeout-ms {:error (ex-info "Async cell timed out" {:cell-id (:id cell)})})]
+         (if (:error v)
+           (throw (if (instance? Throwable (:error v))
+                    (:error v)
+                    (ex-info (str (:error v)) {:cell-id (:id cell)})))
+           (:ok v))))
+     ((:handler cell) resources data))))
 
 (defn- build-join-handler
   "Builds a synthetic handler function for a join node.
@@ -190,6 +206,7 @@
   (let [member-names (:cells join-def)
         strategy     (:strategy join-def :parallel)
         merge-fn     (:merge-fn join-def)
+        timeout-ms   (:timeout-ms join-def default-async-timeout-ms)
         member-cells (mapv (fn [m] {:name m :cell (cell/get-cell! (get cells-map m))})
                            member-names)]
     (fn [resources data]
@@ -197,32 +214,23 @@
             run-member (fn [{:keys [name cell]}]
                          (let [start-ns (System/nanoTime)]
                            (try
-                             (let [result (invoke-cell-handler cell resources snapshot)
+                             (let [result (invoke-cell-handler cell resources snapshot timeout-ms)
                                    dur-ms (/ (- (System/nanoTime) start-ns) 1e6)]
                                {:name     name
                                 :cell-id  (:id cell)
                                 :result   result
                                 :duration-ms dur-ms
                                 :status   :ok})
-                             (catch Exception e
+                             (catch Throwable e
                                (let [dur-ms (/ (- (System/nanoTime) start-ns) 1e6)]
                                  {:name     name
                                   :cell-id  (:id cell)
-                                  :error    (ex-message e)
+                                  :error    (or (ex-message e) (.toString e))
                                   :duration-ms dur-ms
                                   :status   :error})))))
             outcomes (if (= strategy :parallel)
                        (let [futures (mapv #(future (run-member %)) member-cells)]
-                         (mapv (fn [f]
-                                 (try
-                                   (deref f)
-                                   (catch Exception e
-                                     ;; Unwrap ExecutionException
-                                     (let [cause (or (.getCause e) e)]
-                                       {:error    (ex-message cause)
-                                        :status   :error
-                                        :duration-ms 0}))))
-                               futures))
+                         (mapv deref futures))
                        ;; Sequential
                        (mapv run-member member-cells))
             errors  (filterv #(= :error (:status %)) outcomes)
@@ -243,20 +251,37 @@
                             (apply merge data (map :result successes))))]
         (assoc merged-data :mycelium/join-traces join-traces)))))
 
+(defn- get-map-entries
+  "Extracts top-level entries from a Malli :map schema as a map of {key -> type-schema}.
+   Returns {} if not a :map schema."
+  [schema]
+  (if (and (vector? schema) (= :map (first schema)))
+    (into {}
+          (keep (fn [entry]
+                  (when (and (vector? entry) (>= (count entry) 2))
+                    [(first entry) (second entry)])))
+          (rest schema))
+    {}))
+
 (defn- build-join-input-schema
   "Builds a synthesized input schema for a join node.
-   Union of all member cells' input keys."
+   Union of all member cells' input keys with their actual types preserved.
+   When the same key appears in multiple members with different types,
+   the first type encountered wins (they must be compatible for the
+   workflow to function correctly)."
   [join-def cells-map]
   (let [member-names (:cells join-def)
-        all-keys (reduce (fn [acc member]
-                           (let [cell (cell/get-cell! (get cells-map member))
-                                 schema (get-in cell [:schema :input])]
-                             (into acc (or (get-map-keys schema) #{}))))
-                         #{}
-                         member-names)]
-    (if (empty? all-keys)
+        all-entries (reduce (fn [acc member]
+                              (let [cell (cell/get-cell! (get cells-map member))
+                                    schema (get-in cell [:schema :input])
+                                    entries (get-map-entries schema)]
+                                ;; merge — first type wins for duplicate keys
+                                (merge entries acc)))
+                            {}
+                            member-names)]
+    (if (empty? all-entries)
       [:map]
-      (into [:map] (mapv (fn [k] [k :any]) all-keys)))))
+      (into [:map] (mapv (fn [[k t]] [k t]) all-entries)))))
 
 (defn- build-join-output-keys
   "Gets the union of all output keys from all join member cells."
@@ -382,6 +407,26 @@
   [[:failure (fn [d] (some? (:mycelium/join-error d)))]
    [:done    (fn [d] (not (:mycelium/join-error d)))]])
 
+(defn- compute-join-dispatches
+  "Computes effective dispatches for join nodes, filtering join-default-dispatches
+   to only include labels that match existing edge keys. Returns a dispatches map
+   keyed by join name."
+  [joins-map edges]
+  (reduce (fn [acc [join-name _]]
+            (let [edge-def (get edges join-name)]
+              (if (and (map? edge-def)
+                       (not (get acc join-name)))
+                (let [edge-keys (set (keys edge-def))
+                      filtered  (filterv (fn [[label _]]
+                                           (contains? edge-keys label))
+                                         join-default-dispatches)]
+                  (if (seq filtered)
+                    (assoc acc join-name filtered)
+                    acc))
+                acc)))
+          {}
+          joins-map))
+
 (defn validate-workflow
   "Runs all validations on a workflow definition.
    Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
@@ -404,20 +449,7 @@
       (v/validate-edge-targets! edges valid-names)
       (v/validate-reachability! edges valid-names))
     ;; Merge default dispatches — include join default dispatches (filtered to match edge keys)
-    (let [join-dispatches (reduce (fn [acc [join-name _]]
-                                   (let [edge-def (get edges join-name)]
-                                     (if (and (map? edge-def)
-                                              (not (get acc join-name)))
-                                       (let [edge-keys (set (keys edge-def))
-                                             filtered  (filterv (fn [[label _]]
-                                                                  (contains? edge-keys label))
-                                                                join-default-dispatches)]
-                                         (if (seq filtered)
-                                           (assoc acc join-name filtered)
-                                           acc))
-                                       acc)))
-                                 {}
-                                 joins-map)
+    (let [join-dispatches    (compute-join-dispatches joins-map edges)
           effective-dispatches (merge join-dispatches
                                       (merge-default-dispatches dispatches edges cells))]
       (v/validate-dispatch-coverage! edges effective-dispatches))
@@ -451,20 +483,7 @@
          ;; Determine which cells are consumed by joins
          join-members (set (mapcat :cells (vals joins-map)))
          ;; Merge default dispatches from cell specs AND join default dispatches (filtered to edge keys)
-         join-dispatches (reduce (fn [acc [join-name _]]
-                                  (let [edge-def (get edges join-name)]
-                                    (if (and (map? edge-def)
-                                             (not (get acc join-name)))
-                                      (let [edge-keys (set (keys edge-def))
-                                            filtered  (filterv (fn [[label _]]
-                                                                 (contains? edge-keys label))
-                                                               join-default-dispatches)]
-                                        (if (seq filtered)
-                                          (assoc acc join-name filtered)
-                                          acc))
-                                      acc)))
-                                {}
-                                joins-map)
+         join-dispatches    (compute-join-dispatches joins-map edges)
          effective-dispatches (merge join-dispatches
                                      (merge-default-dispatches dispatches edges cells))
          ;; Build state->cell map for non-join-member cells

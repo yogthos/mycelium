@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [mycelium.cell :as cell]
             [mycelium.workflow :as wf]
-            [maestro.core :as fsm]))
+            [maestro.core :as fsm])
+  (:import [java.util.concurrent ExecutionException]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
@@ -596,3 +597,192 @@
             :edges {:start {:done :j1}
                     :j1    {:done :end}}
             :dispatches {:start [[:done (constantly true)]]}})))))
+
+;; ===== Bug fix: run-member catches Throwable, not just Exception =====
+
+(deftest join-throwable-in-branch-test
+  (testing "An Error (not Exception) in a join branch is caught and reported, not propagated"
+    (defmethod cell/cell-spec :join/throws-error [_]
+      {:id      :join/throws-error
+       :handler (fn [_ _data] (throw (AssertionError. "assertion failed in cell")))
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/ok-for-error [_]
+      {:id      :join/ok-for-error
+       :handler (fn [_ data] (assoc data :ok true))
+       :schema  {:input [:map] :output [:map [:ok :boolean]]}})
+    (defmethod cell/cell-spec :join/error-start [_]
+      {:id      :join/error-start
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/error-catch [_]
+      {:id      :join/error-catch
+       :handler (fn [_ data] (assoc data :caught true))
+       :schema  {:input [:map] :output [:map [:caught :boolean]]}})
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start   :join/error-start
+                             :err-c   :join/throws-error
+                             :ok-c    :join/ok-for-error
+                             :handler :join/error-catch}
+                     :joins {:j1 {:cells [:err-c :ok-c]}}
+                     :edges {:start   {:done :j1}
+                             :j1      {:done :end, :failure :handler}
+                             :handler {:done :end}}
+                     :dispatches {:start   [[:done (constantly true)]]
+                                  :handler [[:done (constantly true)]]}})
+          result (fsm/run compiled {} {:data {}})]
+      ;; Should route to :failure and be caught, not crash
+      (is (= true (:caught result)))
+      ;; Error map should have complete info with :cell key
+      (let [errors (:mycelium/join-error result)]
+        (is (vector? errors))
+        (is (= 1 (count errors)))
+        (is (some? (:cell (first errors))))
+        (is (some? (:error (first errors))))))))
+
+;; ===== Bug fix: deref catch produces complete outcome map =====
+
+(deftest join-parallel-deref-outcome-has-name-and-cell-id-test
+  (testing "Join trace entries always have :cell and :cell-id even on error"
+    (defmethod cell/cell-spec :join/trace-fail [_]
+      {:id      :join/trace-fail
+       :handler (fn [_ _data] (throw (Exception. "boom")))
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/trace-ok [_]
+      {:id      :join/trace-ok
+       :handler (fn [_ data] (assoc data :v 1))
+       :schema  {:input [:map] :output [:map [:v :int]]}})
+    (defmethod cell/cell-spec :join/trace-start [_]
+      {:id      :join/trace-start
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/trace-err-handler [_]
+      {:id      :join/trace-err-handler
+       :handler (fn [_ data] (assoc data :handled true))
+       :schema  {:input [:map] :output [:map [:handled :boolean]]}})
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start   :join/trace-start
+                             :fail-c  :join/trace-fail
+                             :ok-c    :join/trace-ok
+                             :handler :join/trace-err-handler}
+                     :joins {:j1 {:cells [:fail-c :ok-c] :strategy :parallel}}
+                     :edges {:start   {:done :j1}
+                             :j1      {:done :end, :failure :handler}
+                             :handler {:done :end}}
+                     :dispatches {:start   [[:done (constantly true)]]
+                                  :handler [[:done (constantly true)]]}})
+          result (fsm/run compiled {} {:data {}})
+          trace  (:mycelium/trace result)
+          ;; The join trace entry is the second one (after :start)
+          join-entry (second trace)
+          join-traces (:join-traces join-entry)]
+      ;; Every sub-trace must have :cell and :cell-id
+      (doseq [jt join-traces]
+        (is (some? (:cell jt)) (str "Missing :cell in join trace: " jt))
+        (is (some? (:cell-id jt)) (str "Missing :cell-id in join trace: " jt))))))
+
+;; ===== Bug fix: cell can't be in multiple joins =====
+
+(deftest join-rejects-cell-in-multiple-joins-test
+  (testing "A cell that appears in more than one join is rejected"
+    (defmethod cell/cell-spec :join/multi-start [_]
+      {:id      :join/multi-start
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/shared-cell [_]
+      {:id      :join/shared-cell
+       :handler (fn [_ data] (assoc data :x 1))
+       :schema  {:input [:map] :output [:map [:x :int]]}})
+    (defmethod cell/cell-spec :join/other-cell [_]
+      {:id      :join/other-cell
+       :handler (fn [_ data] (assoc data :y 2))
+       :schema  {:input [:map] :output [:map [:y :int]]}})
+    (is (thrown-with-msg? Exception #"[Mm]ultiple joins|member of more than one"
+          (wf/compile-workflow
+           {:cells {:start       :join/multi-start
+                    :shared-cell :join/shared-cell
+                    :other-cell  :join/other-cell}
+            :joins {:j1 {:cells [:shared-cell]}
+                    :j2 {:cells [:shared-cell :other-cell]}}
+            :edges {:start {:done :j1}
+                    :j1    {:done :j2}
+                    :j2    {:done :end}}
+            :dispatches {:start [[:done (constantly true)]]}})))))
+
+;; ===== Bug fix: join input schema preserves member types =====
+
+(deftest join-input-schema-preserves-types-test
+  (testing "Join synthesized input schema preserves actual types from member cells"
+    ;; Members require [:user-id :string], but start produces [:user-id :int]
+    ;; The join's synthesized input schema should have :string for :user-id,
+    ;; so the pre-interceptor catches the type mismatch at the join boundary.
+    (defmethod cell/cell-spec :join/typed-a [_]
+      {:id      :join/typed-a
+       :handler (fn [_ data] (assoc data :out-a 1))
+       :schema  {:input  [:map [:user-id :string] [:count :int]]
+                 :output [:map [:out-a :int]]}})
+    (defmethod cell/cell-spec :join/typed-b [_]
+      {:id      :join/typed-b
+       :handler (fn [_ data] (assoc data :out-b 2))
+       :schema  {:input  [:map [:user-id :string]]
+                 :output [:map [:out-b :int]]}})
+    ;; Start produces :user-id as :int (declared correctly in its own schema)
+    ;; but the join members expect :string
+    (defmethod cell/cell-spec :join/typed-start [_]
+      {:id      :join/typed-start
+       :handler (fn [_ data] (assoc data :user-id 12345 :count 5))
+       :schema  {:input [:map] :output [:map [:user-id :int] [:count :int]]}})
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start   :join/typed-start
+                             :typed-a :join/typed-a
+                             :typed-b :join/typed-b}
+                     :joins {:j1 {:cells [:typed-a :typed-b]}}
+                     :edges {:start {:done :j1}
+                             :j1    {:done :end}}
+                     :dispatches {:start [[:done (constantly true)]]}})
+          ;; Maestro's default on-error throws, so catch it and inspect the data
+          result (try
+                   (fsm/run compiled {} {:data {}})
+                   (catch clojure.lang.ExceptionInfo e
+                     (get-in (ex-data e) [:data])))]
+      ;; With :any types, :user-id 12345 would pass the join pre-interceptor.
+      ;; With proper types (:string), the pre-interceptor should catch the mismatch
+      ;; and route to ::fsm/error, putting :mycelium/schema-error on data.
+      (is (some? (:mycelium/schema-error result))
+          "Join pre-interceptor should reject :user-id as int when schema expects :string"))))
+
+;; ===== Bug fix: configurable async timeout =====
+
+(deftest join-configurable-timeout-test
+  (testing "Join :timeout-ms is honored for async cells"
+    (defmethod cell/cell-spec :join/slow-async [_]
+      {:id      :join/slow-async
+       :handler (fn [_ data callback _error-cb]
+                  (future
+                    (Thread/sleep 2000) ;; 2 seconds — longer than our timeout
+                    (callback (assoc data :slow-result "done"))))
+       :schema  {:input  [:map]
+                 :output [:map [:slow-result :string]]}
+       :async?  true})
+    (defmethod cell/cell-spec :join/timeout-start [_]
+      {:id      :join/timeout-start
+       :handler (fn [_ data] data)
+       :schema  {:input [:map] :output [:map]}})
+    (defmethod cell/cell-spec :join/timeout-handler [_]
+      {:id      :join/timeout-handler
+       :handler (fn [_ data] (assoc data :timed-out true))
+       :schema  {:input [:map] :output [:map [:timed-out :boolean]]}})
+    (let [compiled (wf/compile-workflow
+                    {:cells {:start   :join/timeout-start
+                             :slow    :join/slow-async
+                             :handler :join/timeout-handler}
+                     :joins {:j1 {:cells      [:slow]
+                                   :timeout-ms 100}} ;; 100ms timeout
+                     :edges {:start   {:done :j1}
+                             :j1      {:done :end, :failure :handler}
+                             :handler {:done :end}}
+                     :dispatches {:start   [[:done (constantly true)]]
+                                  :handler [[:done (constantly true)]]}})
+          result (fsm/run compiled {} {:data {}})]
+      ;; Should have timed out and routed to error handler
+      (is (= true (:timed-out result)))
+      (is (some? (:mycelium/join-error result))))))
