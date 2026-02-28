@@ -76,6 +76,38 @@
           :errors  (me/humanize explanation)
           :data    data})))))
 
+(defn- compile-schema-value
+  "Compiles a single schema value to a Malli schema object if it's a raw form.
+   Returns the value unchanged if it's already compiled or nil."
+  [schema-val]
+  (cond
+    (nil? schema-val) nil
+    (m/schema? schema-val) schema-val
+    :else (m/schema schema-val)))
+
+(defn pre-compile-schemas
+  "Pre-compiles all Malli schemas in a state->cell map.
+   Converts raw schema forms (vectors, keywords) into compiled Malli schema objects
+   so that validate-input/validate-output don't re-parse them on every call.
+   Returns an updated state->cell map with compiled schemas."
+  [state->cell]
+  (into {}
+        (map (fn [[state-id cell]]
+               (let [input  (get-in cell [:schema :input])
+                     output (get-in cell [:schema :output])
+                     compiled-input  (compile-schema-value input)
+                     compiled-output (cond
+                                      (nil? output)    nil
+                                      (map? output)    (into {} (map (fn [[k v]]
+                                                                       [k (compile-schema-value v)])
+                                                                     output))
+                                      :else            (compile-schema-value output))
+                     updated-cell (cond-> cell
+                                    compiled-input  (assoc-in [:schema :input] compiled-input)
+                                    (some? compiled-output) (assoc-in [:schema :output] compiled-output))]
+                 [state-id updated-cell])))
+        state->cell))
+
 (defn make-pre-interceptor
   "Creates a Maestro pre-interceptor that validates input schemas.
    `state->cell` is a map of state-id → cell-spec.

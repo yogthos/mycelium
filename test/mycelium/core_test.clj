@@ -165,3 +165,57 @@
       (is (empty? (:unreachable analysis)))
       (is (empty? (:no-path-to-end analysis)))
       (is (empty? (:cycles analysis))))))
+
+;; ===== 9. pre-compile returns a compiled workflow =====
+
+(deftest pre-compile-test
+  (testing "pre-compile returns a compiled workflow map"
+    (defmethod cell/cell-spec :core/pre-adder [_]
+      {:id      :core/pre-adder
+       :handler (fn [_ data] (assoc data :result (+ (:x data) 100)))
+       :schema  {:input [:map [:x :int]] :output [:map [:result :int]]}})
+
+    (let [compiled (mycelium/pre-compile
+                    {:cells {:start :core/pre-adder}
+                     :edges {:start {:done :end}}
+                     :dispatches {:start [[:done (constantly true)]]}})]
+      (is (map? compiled))
+      (is (contains? compiled :compiled-fsm)))))
+
+;; ===== 10. run-compiled uses pre-compiled workflow =====
+
+(deftest run-compiled-test
+  (testing "run-compiled runs a pre-compiled workflow without recompilation"
+    (defmethod cell/cell-spec :core/rc-adder [_]
+      {:id      :core/rc-adder
+       :handler (fn [_ data] (assoc data :result (+ (:x data) 50)))
+       :schema  {:input [:map [:x :int]] :output [:map [:result :int]]}})
+
+    (let [compiled (mycelium/pre-compile
+                    {:cells {:start :core/rc-adder}
+                     :edges {:start {:done :end}}
+                     :dispatches {:start [[:done (constantly true)]]}})
+          result (mycelium/run-compiled compiled {} {:x 10})]
+      (is (= 60 (:result result))))))
+
+;; ===== 11. run-compiled validates input-schema =====
+
+(deftest run-compiled-input-schema-test
+  (testing "run-compiled validates input schema from pre-compiled workflow"
+    (defmethod cell/cell-spec :core/rci-adder [_]
+      {:id      :core/rci-adder
+       :handler (fn [_ data] (assoc data :result (+ (:x data) 1)))
+       :schema  {:input [:map [:x :int]] :output [:map [:result :int]]}})
+
+    (let [compiled (mycelium/pre-compile
+                    {:cells {:start :core/rci-adder}
+                     :edges {:start {:done :end}}
+                     :dispatches {:start [[:done (constantly true)]]}
+                     :input-schema [:map [:x :int]]})]
+      ;; Valid input
+      (let [result (mycelium/run-compiled compiled {} {:x 5})]
+        (is (= 6 (:result result)))
+        (is (nil? (:mycelium/input-error result))))
+      ;; Invalid input
+      (let [result (mycelium/run-compiled compiled {} {:wrong "key"})]
+        (is (map? (:mycelium/input-error result)))))))

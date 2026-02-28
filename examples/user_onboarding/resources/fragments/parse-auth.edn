@@ -1,0 +1,68 @@
+{:id    :parse-auth
+ :doc   "Form/API auth: parse credentials from request body → validate session → fetch profile"
+
+ :entry :parse-request
+ :exits [:success :failure]
+
+ :cells
+ {:parse-request
+  {:id       :auth/parse-request
+   :doc      "Extract credentials from the request body"
+   :schema   {:input  [:map
+                        [:http-request [:map
+                          [:headers map?]
+                          [:body map?]]]]
+              :output {:success [:map
+                                  [:user-id :string]
+                                  [:auth-token :string]]
+                       :failure [:map
+                                  [:error-type :keyword]
+                                  [:error-message :string]]}}
+   :on-error :_exit/failure
+   :requires []}
+
+  :validate-session
+  {:id       :auth/validate-session
+   :doc      "Check credentials against the session store"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:auth-token :string]]
+              :output {:authorized   [:map
+                                       [:session-valid :boolean]
+                                       [:user-id :string]]
+                       :unauthorized [:map
+                                       [:session-valid :boolean]
+                                       [:error-type :keyword]
+                                       [:error-message :string]]}}
+   :on-error :_exit/failure
+   :requires [:db]}
+
+  :fetch-profile
+  {:id       :user/fetch-profile
+   :doc      "Fetch user profile from database"
+   :schema   {:input  [:map
+                        [:user-id :string]
+                        [:session-valid :boolean]]
+              :output {:found     [:map
+                                    [:profile map?]]
+                       :not-found [:map
+                                    [:error-type :keyword]
+                                    [:error-message :string]]}}
+   :on-error :_exit/failure
+   :requires [:db]}}
+
+ :edges
+ {:parse-request   {:success :validate-session
+                    :failure :_exit/failure}
+  :validate-session {:authorized   :fetch-profile
+                     :unauthorized :_exit/failure}
+  :fetch-profile    {:found     :_exit/success
+                     :not-found :_exit/failure}}
+
+ :dispatches
+ {:parse-request   [[:success (fn [data] (:auth-token data))]
+                    [:failure (fn [data] (:error-type data))]]
+  :validate-session [[:authorized   (fn [data] (:session-valid data))]
+                     [:unauthorized (fn [data] (not (:session-valid data)))]]
+  :fetch-profile    [[:found     (fn [data] (:profile data))]
+                     [:not-found (fn [data] (:error-type data))]]}}

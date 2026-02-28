@@ -430,8 +430,11 @@
 (defn validate-workflow
   "Runs all validations on a workflow definition.
    Merges :default-dispatches from cell specs as fallback for cells without explicit dispatches."
-  [{:keys [cells edges dispatches joins]}]
+  [{:keys [cells edges dispatches joins input-schema]}]
   (validate-cells-exist! cells)
+  ;; Validate :input-schema well-formedness if present
+  (when input-schema
+    (v/validate-malli-schema! input-schema "input-schema"))
   ;; Validate join definitions
   (let [joins-map (or joins {})]
     (when (seq joins-map)
@@ -454,6 +457,89 @@
                                       (merge-default-dispatches dispatches edges cells))]
       (v/validate-dispatch-coverage! edges effective-dispatches))
     (validate-schema-chain! edges cells joins-map)))
+
+;; ===== Workflow-level interceptor matching =====
+
+(defn- glob-match?
+  "Simple glob matching: supports * as a wildcard for a single path segment.
+   E.g., \"ui/*\" matches \"ui/render-dashboard\" but not \"ui/sub/thing\"."
+  [pattern s]
+  (let [regex-str (-> pattern
+                      (clojure.string/replace "." "\\.")
+                      (clojure.string/replace "*" "[^/]*"))
+        regex (re-pattern (str "^" regex-str "$"))]
+    (some? (re-matches regex s))))
+
+(defn- match-scope
+  "Checks if a cell matches an interceptor scope.
+   scope can be:
+     :all — matches everything
+     {:id-match \"ui/*\"} — cell :id matches glob
+     {:cells [:x :y]} — cell name is in the list"
+  [scope cell-name cell-id]
+  (cond
+    (= scope :all)
+    true
+
+    (and (map? scope) (:id-match scope))
+    (glob-match? (:id-match scope) (str (namespace cell-id) "/" (name cell-id)))
+
+    (and (map? scope) (:cells scope))
+    (contains? (set (:cells scope)) cell-name)
+
+    :else false))
+
+(defn- apply-pres [data pres]
+  (reduce (fn [d pre-fn] (pre-fn d)) data pres))
+
+(defn- apply-posts [data posts]
+  (reduce (fn [d post-fn] (post-fn d)) data posts))
+
+(defn- wrap-handler-with-interceptors
+  "Wraps a cell handler with matching workflow-level interceptors.
+   Handles both sync (2-arity) and async (4-arity) handlers.
+   Interceptors apply in declaration order: first pre runs first, first post runs first."
+  [handler matching-interceptors]
+  (if (empty? matching-interceptors)
+    handler
+    (let [pres  (seq (keep :pre matching-interceptors))
+          posts (seq (keep :post matching-interceptors))]
+      (fn
+        ;; Sync: (fn [resources data] -> data)
+        ([resources data]
+         (let [data'   (if pres (apply-pres data pres) data)
+               result  (handler resources data')
+               result' (if posts (apply-posts result posts) result)]
+           result'))
+        ;; Async: (fn [resources data callback error-callback])
+        ([resources data callback error-callback]
+         (let [data' (if pres (apply-pres data pres) data)]
+           (handler resources data'
+                    (fn [result]
+                      (callback (if posts (apply-posts result posts) result)))
+                    error-callback)))))))
+
+(defn- apply-workflow-interceptors
+  "For each cell, finds matching interceptors and wraps the handler.
+   cells-map: {cell-name -> cell-id}
+   interceptors: [{:id :scope :pre :post}]
+   Returns updated state->cell map with wrapped handlers."
+  [state->cell cells-map interceptors]
+  (if (empty? interceptors)
+    state->cell
+    (reduce (fn [acc [state-id cell]]
+              (let [cell-name (some (fn [[cname _]]
+                                     (when (= (resolve-state-id cname) state-id)
+                                       cname))
+                                   cells-map)
+                    cell-id   (:id cell)
+                    matching  (filterv #(match-scope (:scope %) cell-name cell-id) interceptors)]
+                (if (seq matching)
+                  (assoc acc state-id
+                         (update cell :handler wrap-handler-with-interceptors matching))
+                  acc)))
+            state->cell
+            state->cell)))
 
 ;; ===== Compilation =====
 
@@ -506,6 +592,11 @@
                                           :default-dispatches join-default-dispatches}])))
                                joins-map)
          state->cell (merge state->cell join-cell-specs)
+         ;; Pre-compile all Malli schemas so interceptors use compiled objects
+         state->cell (schema/pre-compile-schemas state->cell)
+         ;; Apply workflow-level interceptors (wraps cell handlers)
+         wf-interceptors (:interceptors workflow)
+         state->cell (apply-workflow-interceptors state->cell cells wf-interceptors)
          ;; Build state->edge-targets for post-interceptor transition lookup
          state->edge-targets (build-edge-targets edges)
          ;; Build state->names for human-readable trace entries
@@ -522,8 +613,8 @@
          fsm-cell-states (into {}
                                (keep (fn [[cell-name cell-id]]
                                        (when-not (contains? join-members cell-name)
-                                         (let [cell      (cell/get-cell! cell-id)
-                                               state-id  (resolve-state-id cell-name)
+                                         (let [state-id  (resolve-state-id cell-name)
+                                               cell      (get state->cell state-id)
                                                edge-def  (get edges cell-name)
                                                dispatch-vec (get effective-dispatches cell-name)]
                                            [state-id
@@ -533,11 +624,11 @@
                                              (when (:async? cell)
                                                {:async? true}))]))))
                                cells)
-         ;; Build FSM states for joins
+         ;; Build FSM states for joins (use interceptor-wrapped handlers from state->cell)
          fsm-join-states (into {}
                                (map (fn [[join-name _join-def]]
                                       (let [state-id     (resolve-state-id join-name)
-                                            join-cell    (get join-cell-specs state-id)
+                                            join-cell    (get state->cell state-id)
                                             edge-def     (get edges join-name)
                                             dispatch-vec (get effective-dispatches join-name)]
                                         [state-id

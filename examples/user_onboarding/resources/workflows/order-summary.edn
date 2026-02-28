@@ -2,14 +2,11 @@
  :doc "Order summary page: authenticates user, fetches profile AND order
        history in parallel via a join, then renders a combined summary.
 
-       This exercises a join node (:fetch-data) that runs :fetch-profile
-       and :fetch-orders in parallel. Both receive the same input snapshot
-       (containing :user-id from :validate-session) and their outputs
-       are merged into a single data map for :render-summary.
+       The :fetch-data join runs :fetch-profile and :fetch-orders in parallel.
+       Both receive the same input snapshot (containing :user-id from
+       :validate-session) and their outputs are merged for :render-summary."
 
-       The graph looks like:
-         start → validate-session → fetch-data (join: fetch-profile + fetch-orders) → render-summary → end
-                                                                                                    ↘ error ← (any failure)"
+ :input-schema [:map [:http-request [:map]]]
 
  :cells
  {:start
@@ -22,6 +19,7 @@
                        :failure [:map
                                   [:error-type :keyword]
                                   [:error-message :string]]}}
+   :on-error :render-error
    :requires []}
 
   :validate-session
@@ -36,6 +34,7 @@
                                        [:session-valid :boolean]
                                        [:error-type :keyword]
                                        [:error-message :string]]}}
+   :on-error :render-error
    :requires [:db]}
 
   :fetch-profile
@@ -51,10 +50,9 @@
                        :not-found [:map
                                     [:error-type :keyword]
                                     [:error-message :string]]}}
+   :on-error :render-error
    :requires [:db]}
 
-  ;; This cell needs :user-id which was produced by :validate-session.
-  ;; It runs in parallel with :fetch-profile via the :fetch-data join.
   :fetch-orders
   {:id       :user/fetch-orders
    :doc      "Fetch order history — needs :user-id from validate-session"
@@ -62,10 +60,9 @@
                          [:user-id :string]]
               :output [:map
                         [:orders [:vector :map]]]}
+   :on-error :render-error
    :requires [:db]}
 
-  ;; This cell needs BOTH :profile (from :fetch-profile) AND
-  ;; :orders (from :fetch-orders) — the join merges both outputs.
   :render-summary
   {:id       :ui/render-order-summary
    :doc      "Render combined summary — needs :profile AND :orders from join"
@@ -76,6 +73,7 @@
                          [:orders [:vector :map]]]
               :output [:map
                         [:html :string]]}
+   :on-error :render-error
    :requires []}
 
   :render-error
@@ -85,6 +83,7 @@
               :output [:map
                         [:html :string]
                         [:error-status :int]]}
+   :on-error nil
    :requires []}}
 
  :joins

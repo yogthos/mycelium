@@ -6,6 +6,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [mycelium.cell :as cell]
+            [mycelium.fragment :as fragment]
             [mycelium.validation :as v]))
 
 ;; ===== Cell definition validation =====
@@ -26,9 +27,34 @@
 
 ;; ===== Manifest validation =====
 
+(defn- validate-on-error!
+  "Validates :on-error declarations on cells.
+   In strict mode, missing :on-error throws. In non-strict mode, it's ignored.
+   If :on-error is present and non-nil, the target must be a valid cell name."
+  [cells strict?]
+  (let [cell-names (set (keys cells))]
+    (doseq [[cell-name cell-def] cells]
+      (if (contains? cell-def :on-error)
+        ;; :on-error is present — if non-nil, validate the target
+        (when-let [target (:on-error cell-def)]
+          (when-not (contains? cell-names target)
+            (throw (ex-info (str "Cell " cell-name " :on-error references " target
+                                 " which is not found in :cells")
+                            {:cell-name cell-name :on-error target
+                             :valid-cells cell-names}))))
+        ;; :on-error is missing
+        (when strict?
+          (throw (ex-info (str "Cell " cell-name " missing :on-error declaration. "
+                               "Add :on-error with a target cell keyword or nil.")
+                          {:cell-name cell-name})))))))
+
 (defn validate-manifest
-  "Validates a manifest structure. Returns the manifest if valid, throws otherwise."
-  [{:keys [id cells edges dispatches joins] :as manifest}]
+  "Validates a manifest structure. Returns the manifest if valid, throws otherwise.
+   Optional opts map:
+     :strict? — if true (default), requires :on-error on every cell.
+                Set to false to allow missing :on-error (legacy mode)."
+  ([manifest] (validate-manifest manifest {:strict? true}))
+  ([{:keys [id cells edges dispatches joins] :as manifest} opts]
   (when-not id
     (throw (ex-info "Manifest missing :id" {:manifest manifest})))
   (when-not cells
@@ -38,6 +64,8 @@
   ;; Validate each cell definition
   (doseq [[cell-name cell-def] cells]
     (validate-cell-def! cell-name cell-def))
+  ;; Validate :on-error declarations
+  (validate-on-error! cells (:strict? opts))
   ;; Determine join members — cells consumed by joins don't need edges
   (let [joins-map    (or joins {})
         join-members (set (mapcat :cells (vals joins-map)))
@@ -73,16 +101,30 @@
           effective-dispatches (merge join-dispatches (or dispatches {}))]
       (v/validate-dispatch-coverage! edges effective-dispatches))
     (v/validate-reachability! edges valid-names))
-  manifest)
+  ;; Validate :input-schema if present
+  (when-let [input-schema (:input-schema manifest)]
+    (v/validate-malli-schema! input-schema "input-schema"))
+  manifest))
+
+;; ===== Fragment expansion =====
+
+(def expand-fragments
+  "Expands all :fragments in a manifest, merging fragment cells/edges/dispatches into the host.
+   See mycelium.fragment/expand-all-fragments."
+  fragment/expand-all-fragments)
 
 ;; ===== Manifest loading =====
 
 (defn load-manifest
-  "Loads and validates a manifest from an EDN file path."
+  "Loads and validates a manifest from an EDN file path.
+   If the manifest contains :fragments, expands them before validation."
   [path]
   (let [content (slurp path)
-        manifest (edn/read-string content)]
-    (validate-manifest manifest)))
+        manifest (edn/read-string content)
+        expanded (if (:fragments manifest)
+                   (expand-fragments manifest)
+                   manifest)]
+    (validate-manifest expanded)))
 
 ;; ===== Cell brief generation =====
 
@@ -199,4 +241,6 @@
     (cond-> {:cells cell-ids
              :edges edges}
       dispatches (assoc :dispatches dispatches)
-      (:joins manifest) (assoc :joins (:joins manifest)))))
+      (:joins manifest) (assoc :joins (:joins manifest))
+      (:input-schema manifest) (assoc :input-schema (:input-schema manifest))
+      (:interceptors manifest) (assoc :interceptors (:interceptors manifest)))))

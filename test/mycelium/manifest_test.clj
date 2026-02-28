@@ -13,12 +13,14 @@
             :doc      "Parse input"
             :schema   {:input  [:map [:x :int]]
                        :output [:map [:y :int]]}
+            :on-error nil
             :requires []}
            :process
            {:id       :test/process
             :doc      "Process data"
             :schema   {:input  [:map [:y :int]]
                        :output [:map [:z :string]]}
+            :on-error nil
             :requires [:db]}}
    :edges {:start   {:success :process, :failure :error}
            :process {:done :end}}
@@ -105,12 +107,14 @@
             :schema   {:input  [:map [:id :string]]
                        :output {:found     [:map [:profile [:map [:name :string]]]]
                                 :not-found [:map [:error-message :string]]}}
+            :on-error nil
             :requires [:db]}
            :render
            {:id       :test/render
             :doc      "Render output"
             :schema   {:input  [:map [:profile [:map [:name :string]]]]
                        :output [:map [:html :string]]}
+            :on-error nil
             :requires []}}
    :edges {:start  {:found     :render
                     :not-found :error}
@@ -166,7 +170,8 @@
   (testing "Unconditional edge (keyword target) needs no dispatch entry"
     (let [m {:id :test/simple
              :cells {:start {:id :test/simple-cell
-                              :schema {:input [:map] :output [:map]}}}
+                              :schema {:input [:map] :output [:map]}
+                              :on-error nil}}
              :edges {:start :end}}]
       (is (some? (manifest/validate-manifest m))))))
 
@@ -181,18 +186,21 @@
             :schema   {:input  [:map [:x :int]]
                        :output {:success [:map [:user-id :string]]
                                 :failure [:map [:error :string]]}}
+            :on-error nil
             :requires []}
            :fetch-a
            {:id       :test/jm-fetch-a
             :doc      "Fetch A"
             :schema   {:input  [:map [:user-id :string]]
                        :output [:map [:profile [:map [:name :string]]]]}
+            :on-error nil
             :requires []}
            :fetch-b
            {:id       :test/jm-fetch-b
             :doc      "Fetch B"
             :schema   {:input  [:map [:user-id :string]]
                        :output [:map [:orders [:vector :map]]]}
+            :on-error nil
             :requires []}
            :render
            {:id       :test/jm-render
@@ -201,6 +209,7 @@
                                 [:profile [:map [:name :string]]]
                                 [:orders [:vector :map]]]
                        :output [:map [:html :string]]}
+            :on-error nil
             :requires []}}
    :joins {:fetch-data {:cells    [:fetch-a :fetch-b]
                         :strategy :parallel}}

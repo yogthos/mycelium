@@ -12,15 +12,16 @@
   (manifest/load-manifest
    (str (io/resource "workflows/home.edn"))))
 
-(def workflow-def
-  (manifest/manifest->workflow manifest-data))
+(def compiled-workflow
+  (myc/pre-compile
+   (manifest/manifest->workflow manifest-data)
+   mw/workflow-opts))
 
 (defn run-home
   "Checks cookie session: renders dashboard if logged in, login form if not."
   [db request]
-  (myc/run-workflow
-   workflow-def
+  (myc/run-compiled
+   compiled-workflow
    {:db db}
    {:http-request {:cookies      (or (:cookies request) {})
-                   :query-params (or (:query-params request) {})}}
-   mw/workflow-opts))
+                   :query-params (or (:query-params request) {})}}))
