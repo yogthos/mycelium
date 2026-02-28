@@ -2,7 +2,8 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [mycelium.cell :as cell]
             [mycelium.workflow :as wf]
-            [maestro.core :as fsm]))
+            [maestro.core :as fsm]
+            [promesa.core :as p]))
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
@@ -190,7 +191,8 @@
                     {:cells {:start :int/async-cell}
                      :edges {:start {:ok :end}}
                      :dispatches {:start [[:ok (constantly true)]]}})
-          result   (fsm/run compiled {} {:data {:x 7}})]
+          result   (fsm/run compiled {} {:data {:x 7}})
+          result   (if (p/promise? result) @result result)]
       (is (= 21 (:y result))))))
 
 ;; ===== 9. Linear workflow trace contains entries in order =====
