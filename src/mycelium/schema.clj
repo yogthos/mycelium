@@ -153,19 +153,33 @@
                 duration-ms (some-> (:trace fsm-state) last :duration-ms)
                 ;; Extract join sub-traces if present
                 join-traces (:mycelium/join-traces data)
+                halted?     (some? (:mycelium/halt data))
                 trace-entry (cond-> {:cell       (get state->names state-id)
                                      :cell-id    (:id cell)
                                      :transition transition
                                      :data       (dissoc data :mycelium/trace :mycelium/join-traces)}
                               duration-ms   (assoc :duration-ms duration-ms)
                               join-traces   (assoc :join-traces join-traces)
+                              halted?       (assoc :halted true)
                               error         (assoc :error error))]
-            (if error
+            (cond
+              error
               (-> fsm-state
                   (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
                   (update :data dissoc :mycelium/join-traces :mycelium/params)
                   (assoc :current-state-id ::fsm/error)
                   (assoc-in [:data :mycelium/schema-error] error))
+
+              halted?
+              (-> fsm-state
+                  (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
+                  (update :data dissoc :mycelium/join-traces)
+                  ;; Save resume point (where dispatches resolved to)
+                  (assoc-in [:data :mycelium/resume] (:current-state-id fsm-state))
+                  ;; Redirect to halt
+                  (assoc :current-state-id ::fsm/halt))
+
+              :else
               (-> fsm-state
                   (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
                   (update :data dissoc :mycelium/join-traces :mycelium/params))))

@@ -373,6 +373,37 @@ Circuit breakers and rate limiters track state across calls. Use `pre-compile` +
 
 `:async-timeout-ms` controls how long the resilience wrapper waits for an async cell's promise to resolve. It is independent of the resilience4j `:timeout` policy.
 
+## Halt & Resume (Human-in-the-Loop)
+
+A cell can pause the entire workflow by returning `:mycelium/halt` in its data. The workflow halts after that cell's handler runs, preserving all accumulated data and trace. A human (or external process) can then inspect the halted state, optionally inject new data, and resume execution from where it stopped.
+
+```clojure
+;; Cell signals halt
+(defmethod cell/cell-spec :review/check [_]
+  {:id      :review/check
+   :handler (fn [_ data]
+              (assoc data :mycelium/halt {:reason :needs-approval
+                                          :item   (:item-id data)}))
+   :schema  {:input [:map [:item-id :string]] :output [:map]}})
+
+;; Run workflow — halts at :review/check
+(let [compiled (myc/pre-compile workflow-def)
+      halted   (myc/run-compiled compiled resources {:item-id "X"})
+      ;; halted contains :mycelium/halt context and :mycelium/resume token
+      ;; Human reviews, then resume with additional data:
+      result   (myc/resume-compiled compiled resources halted {:approved true})]
+  (:approved result)) ;; => true
+```
+
+Key behaviors:
+
+- `:mycelium/halt` can be `true` or a context map (e.g. `{:reason :needs-approval}`)
+- All accumulated data from before the halt is preserved after resume
+- `:mycelium/trace` is continuous across halt/resume boundaries
+- A workflow can halt and resume multiple times
+- If the halting cell dispatches to a branch, resume continues on the correct branch
+- Calling `resume-compiled` on a non-halted result throws an exception
+
 ## Compile-Time Validation
 
 `compile-workflow` validates before any code runs:
