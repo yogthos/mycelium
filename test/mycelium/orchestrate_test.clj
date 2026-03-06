@@ -187,7 +187,19 @@
       (is (re-find #"auth/parse" (:prompt brief)))
       (is (re-find #"auth/validate" (:prompt brief))))))
 
-;; ===== Round 8: region-brief for unknown region throws =====
+;; ===== Round 8: region with unconditional exit edge =====
+
+(deftest region-brief-unconditional-exit-test
+  (testing "Region with unconditional edge leaving the region returns map transitions"
+    (let [brief (orchestrate/region-brief region-manifest :data-fetch)]
+      (is (= 1 (count (:exit-points brief))))
+      (let [exit (first (:exit-points brief))]
+        (is (= :fetch-profile (:cell exit)))
+        ;; Unconditional exit should be wrapped as a map for consistent interface
+        (is (map? (:transitions exit))
+            "Transitions should always be a map, even for unconditional edges")))))
+
+;; ===== Round 9: region-brief for unknown region throws =====
 
 (deftest region-brief-unknown-region-test
   (testing "region-brief for nonexistent region throws"

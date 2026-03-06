@@ -78,18 +78,17 @@
                         (keep (fn [cell-name]
                                 (let [edge-def (get all-edges cell-name)]
                                   (when edge-def
-                                    (let [external (if (keyword? edge-def)
-                                                     (when-not (contains? region-set edge-def)
-                                                       {::unconditional edge-def})
-                                                     (into {}
+                                    (if (keyword? edge-def)
+                                      (when-not (contains? region-set edge-def)
+                                        {:cell cell-name
+                                         :transitions {:unconditional edge-def}})
+                                      (let [external (into {}
                                                        (remove (fn [[_ target]]
                                                                  (contains? region-set target)))
-                                                       edge-def))]
-                                      (when (seq external)
-                                        {:cell cell-name
-                                         :transitions (if (contains? external ::unconditional)
-                                                        (::unconditional external)
-                                                        external)}))))))
+                                                       edge-def)]
+                                        (when (seq external)
+                                          {:cell cell-name
+                                           :transitions external})))))))
                         region-cells)
           ;; Generate prompt
           prompt (str "## Region: " (name region-name) "\n\n"
