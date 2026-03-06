@@ -135,6 +135,8 @@ Use `:default` as an edge label for a catch-all fallback when no other dispatch 
 
 - `:default` must not be the only edge (use an unconditional keyword edge instead)
 - You can provide an explicit `:default` predicate in `:dispatches` to override the auto-generated one
+- `:default` is always evaluated last, even if listed first in `:dispatches`
+- Works with join nodes — add `:default` alongside `:done`/`:failure` edges
 - Trace entries record `:default` as the transition label
 
 ## Join Nodes (Fork-Join)
