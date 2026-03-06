@@ -145,9 +145,10 @@
                              (get-in state->edge-targets
                                      [state-id (:current-state-id fsm-state)]))
                 data       (:data fsm-state)
-                ;; Skip output validation when resilience error is present
-                ;; (the handler was short-circuited by the resilience wrapper)
-                error      (when-not (:mycelium/resilience-error data)
+                ;; Skip output validation when resilience error or timeout is present
+                ;; (the handler was short-circuited)
+                error      (when-not (or (:mycelium/resilience-error data)
+                                         (:mycelium/timeout data))
                              (validate-output cell data transition))
                 ;; Extract duration-ms from the latest Maestro trace segment
                 duration-ms (some-> (:trace fsm-state) last :duration-ms)

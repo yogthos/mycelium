@@ -227,3 +227,28 @@
       (is (= "ok" (:first result)) "First cell completes normally")
       (is (true? (:mycelium/timeout result)) "Second cell times out")
       (is (true? (:c/fallback10 result)) "Routes to fallback"))))
+
+;; ===== Round 11: Timeout skips output schema validation =====
+
+(deftest timeout-skips-output-schema-test
+  (testing "Timed-out cell does not trigger output schema validation error"
+    (defmethod cell/cell-spec :c/strict-output [_]
+      {:id :c/strict-output
+       :handler (fn [_ data]
+                  (Thread/sleep 200)
+                  (assoc data :required-key "value"))
+       :schema {:input [:map]
+                :output [:map [:required-key :string]]}})
+    (make-cell :c/fallback11)
+
+    (let [result (myc/run-workflow
+                   {:cells {:start :c/strict-output, :fallback :c/fallback11}
+                    :edges {:start {:done :end, :timeout :fallback}
+                            :fallback :end}
+                    :dispatches {:start [[:done (fn [d] (not (:mycelium/timeout d)))]]}
+                    :timeouts {:start 50}}
+                   {} {})]
+      (is (true? (:mycelium/timeout result))
+          "Timeout fires")
+      (is (nil? (:mycelium/schema-error result))
+          "No schema error despite missing :required-key"))))
