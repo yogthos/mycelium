@@ -85,19 +85,31 @@
   [result]
   (if (p/promise? result) @result result))
 
+(defn- extract-result
+  "Extracts the data map from an FSM run result.
+   Normal end: result is already the data map (from default-on-end).
+   Halt: result is the FSM state map (minus :fsm) — extract :data."
+  [result]
+  (if (and (map? result) (:data result) (:current-state-id result) (not (:fsm result)))
+    (:data result)
+    result))
+
 (defn run-compiled
   "Runs a pre-compiled workflow. Zero compilation overhead per call.
-   Use `pre-compile` to create the compiled workflow at startup."
+   Use `pre-compile` to create the compiled workflow at startup.
+   If the workflow halts, returns data with :mycelium/halt and :mycelium/resume keys."
   ([compiled-workflow resources initial-data]
    (if-let [input-error (check-input-schema compiled-workflow initial-data)]
      {:mycelium/input-error input-error}
-     (deref-if-promise
-      (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data}))))
+     (extract-result
+      (deref-if-promise
+       (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data})))))
   ([compiled-workflow resources initial-data opts]
    (if-let [input-error (check-input-schema compiled-workflow initial-data)]
      {:mycelium/input-error input-error}
-     (deref-if-promise
-      (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data})))))
+     (extract-result
+      (deref-if-promise
+       (fsm/run (:compiled-fsm compiled-workflow) resources {:data initial-data}))))))
 
 (defn run-compiled-async
   "Like run-compiled but returns a future."
@@ -109,6 +121,30 @@
    (if-let [input-error (check-input-schema compiled-workflow initial-data)]
      (future {:mycelium/input-error input-error})
      (fsm/run-async (:compiled-fsm compiled-workflow) resources {:data initial-data}))))
+
+(defn resume-compiled
+  "Resumes a halted workflow from where it left off.
+   `compiled-workflow` — pre-compiled workflow (from `pre-compile`).
+   `resources` — resources map.
+   `halted-result` — the data map returned from a halted run
+     (must contain :mycelium/resume).
+   `merge-data` — optional map to merge into the data before resuming
+     (e.g., human-provided input)."
+  ([compiled-workflow resources halted-result]
+   (resume-compiled compiled-workflow resources halted-result nil))
+  ([compiled-workflow resources halted-result merge-data]
+   (let [resume-state (:mycelium/resume halted-result)]
+     (when-not resume-state
+       (throw (ex-info "Cannot resume: result is not a halted workflow (missing :mycelium/resume)"
+                       {:result-keys (keys halted-result)})))
+     (let [data (cond-> (dissoc halted-result :mycelium/halt :mycelium/resume)
+                  merge-data (merge merge-data))]
+       (extract-result
+        (deref-if-promise
+         (fsm/run (:compiled-fsm compiled-workflow)
+                  resources
+                  {:current-state-id resume-state
+                   :data data})))))))
 
 (defn run-workflow
   "Convenience function: compiles and runs a workflow in one step.

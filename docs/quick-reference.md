@@ -19,6 +19,10 @@
 ;; Async convenience (returns a future)
 (myc/run-workflow-async workflow-def resources initial-data)
 
+;; Resume a halted workflow (human-in-the-loop)
+(myc/resume-compiled compiled resources halted-result)
+(myc/resume-compiled compiled resources halted-result {:human-input "value"})
+
 ;; Compile a system (all workflows)
 (myc/compile-system {"/route" manifest, ...})
 ```
@@ -507,6 +511,47 @@ Every run produces `:mycelium/trace` — a vector of step-by-step execution reco
 (sys/system->dot system)                ;; => DOT graph string
 ```
 
+## Halt & Resume (Human-in-the-Loop)
+
+A cell can pause the workflow by returning `:mycelium/halt` in its data. The workflow halts after that cell, preserving all accumulated data and trace. A human (or external process) can later resume the workflow from where it stopped.
+
+### Halting
+
+```clojure
+;; Cell signals halt by assoc'ing :mycelium/halt into data
+(defmethod cell/cell-spec :review/check [_]
+  {:id      :review/check
+   :handler (fn [_ data]
+              (assoc data :mycelium/halt {:reason :needs-approval
+                                          :item   (:item-id data)}))
+   :schema  {:input [:map [:item-id :string]] :output [:map]}})
+```
+
+`:mycelium/halt` can be `true` or a map with context for the human reviewer.
+
+### Resuming
+
+```clojure
+(let [compiled (myc/pre-compile workflow-def)
+      halted   (myc/run-compiled compiled resources {:item-id "X"})
+      ;; halted contains :mycelium/halt and :mycelium/resume
+      ;; Inspect halted, get human input, then resume:
+      result   (myc/resume-compiled compiled resources halted {:approved true})]
+  ;; result has data from before + after halt, :mycelium/halt cleared
+  (:approved result)) ;; => true
+```
+
+`resume-compiled` takes an optional merge-data map (4th arg) that is merged into the data before resuming — useful for injecting human-provided input.
+
+### Key Behaviors
+
+- **Data accumulates** — all keys from before the halt are available after resume
+- **Trace is continuous** — `:mycelium/trace` spans the full execution (before + after halt)
+- **Multiple halts** — a workflow can halt and resume multiple times
+- **Branching** — if a halting cell dispatches to a branch, resume continues on the correct branch
+- **Halt trace entry** — the trace entry for the halting cell has `:halted true`
+- **Resume validation** — calling `resume-compiled` on a non-halted result throws an exception
+
 ## Workflow Result Keys
 
 | Key | Description |
@@ -517,3 +562,5 @@ Every run produces `:mycelium/trace` — a vector of step-by-step execution reco
 | `:mycelium/join-error` | Join node error details |
 | `:mycelium/resilience-error` | Resilience policy trigger details (`:type`, `:cell`, `:message`) |
 | `:mycelium/child-trace` | Nested workflow trace (composed cells) |
+| `:mycelium/halt` | Halt context (true or map) — present when workflow is halted |
+| `:mycelium/resume` | Resume state token — present when workflow is halted |
