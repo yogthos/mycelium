@@ -154,6 +154,7 @@
                 ;; Extract join sub-traces if present
                 join-traces (:mycelium/join-traces data)
                 halted?     (some? (:mycelium/halt data))
+                timed-out?  (some? (:mycelium/timeout data))
                 trace-entry (cond-> {:cell       (get state->names state-id)
                                      :cell-id    (:id cell)
                                      :transition transition
@@ -161,6 +162,7 @@
                               duration-ms   (assoc :duration-ms duration-ms)
                               join-traces   (assoc :join-traces join-traces)
                               halted?       (assoc :halted true)
+                              timed-out?    (assoc :timeout? true)
                               error         (assoc :error error))]
             (cond
               error
