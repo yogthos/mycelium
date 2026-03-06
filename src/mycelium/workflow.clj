@@ -535,6 +535,95 @@
           {}
           joins-map))
 
+;; ===== Graph-level timeout wrapping =====
+
+(defn- validate-timeouts!
+  "Validates :timeouts map entries. Each key must be a cell in :cells,
+   value must be a positive integer, and the cell must have a :timeout edge."
+  [timeouts cells edges]
+  (let [cell-names (set (keys cells))]
+    (doseq [[cell-name timeout-ms] timeouts]
+      (when-not (contains? cell-names cell-name)
+        (throw (ex-info (str "timeout references unknown cell " cell-name
+                             " — timeout cell must be in :cells")
+                        {:cell-name cell-name})))
+      (when-not (and (integer? timeout-ms) (pos? timeout-ms))
+        (throw (ex-info (str "Timeout for " cell-name " must be a positive integer, got: " timeout-ms)
+                        {:cell-name cell-name :timeout timeout-ms})))
+      (let [edge-def (get edges cell-name)]
+        (when-not (and (map? edge-def) (contains? edge-def :timeout))
+          (throw (ex-info (str "Cell " cell-name " has a timeout but no :timeout edge target")
+                          {:cell-name cell-name})))))))
+
+(defn- inject-timeout-dispatches
+  "For cells with a :timeout edge and a timeout value, auto-injects a
+   [:timeout (fn [d] (:mycelium/timeout d))] dispatch predicate.
+   Inserted before any :default predicate so timeout takes priority."
+  [dispatches-map timeouts edges]
+  (if (empty? timeouts)
+    dispatches-map
+    (reduce (fn [acc [cell-name _timeout-ms]]
+              (let [edge-def (get edges cell-name)]
+                (if (and (map? edge-def) (contains? edge-def :timeout))
+                  (let [dispatch-vec (get acc cell-name [])
+                        has-timeout? (some #(= :timeout (first %)) dispatch-vec)]
+                    (if has-timeout?
+                      acc
+                      (let [timeout-pred [:timeout (fn [d] (some? (:mycelium/timeout d)))]
+                            ;; Insert first (before user predicates) but before :default
+                            {defaults true others false} (group-by #(= :default (first %)) dispatch-vec)]
+                        (assoc acc cell-name (vec (concat [timeout-pred] others defaults))))))
+                  acc)))
+            (or dispatches-map {})
+            timeouts)))
+
+(defn- wrap-handler-with-timeout
+  "Wraps a cell handler to enforce a graph-level timeout.
+   On timeout, returns the original input data with :mycelium/timeout true.
+   Works for both sync and async handlers."
+  [handler timeout-ms async?]
+  (if async?
+    ;; Async: deliver to promise, deref with timeout
+    (fn [resources data]
+      (let [p (promise)]
+        (handler resources data
+                 (fn [result] (deliver p {:ok result}))
+                 (fn [error] (deliver p {:error error})))
+        (let [v (deref p timeout-ms ::timed-out)]
+          (if (= v ::timed-out)
+            (assoc data :mycelium/timeout true)
+            (if (:error v)
+              (throw (if (instance? Throwable (:error v))
+                       (:error v)
+                       (ex-info (str (:error v)) {})))
+              (:ok v))))))
+    ;; Sync: run in future, deref with timeout
+    (fn [resources data]
+      (let [f (future (handler resources data))
+            v (deref f timeout-ms ::timed-out)]
+        (if (= v ::timed-out)
+          (assoc data :mycelium/timeout true)
+          v)))))
+
+(defn- apply-graph-timeouts
+  "Wraps handlers for cells that have graph-level timeouts.
+   state->cell: {resolved-state-id -> cell-map}
+   timeouts: {cell-name -> ms}"
+  [state->cell timeouts]
+  (if (empty? timeouts)
+    state->cell
+    (reduce (fn [acc [cell-name timeout-ms]]
+              (let [state-id (resolve-state-id cell-name)]
+                (if-let [cell (get acc state-id)]
+                  (assoc acc state-id
+                         (-> cell
+                             (update :handler wrap-handler-with-timeout timeout-ms (:async? cell))
+                             ;; Timeout wrapper blocks, so the cell becomes sync
+                             (dissoc :async?)))
+                  acc)))
+            state->cell
+            timeouts)))
+
 ;; ===== Constraint validation =====
 
 (defn- enumerate-workflow-paths
@@ -664,12 +753,17 @@
         ;; Merge default dispatches — include join default dispatches (filtered to match edge keys)
         ;; Also auto-inject :default catch-all predicates
         ;; Join dispatches take priority (merged last) since joins compute their own dispatches
-        (let [with-defaults      (inject-default-dispatches dispatches edges)
+        (let [timeouts-map        (or (:timeouts raw-workflow) {})
+              with-timeouts      (inject-timeout-dispatches dispatches timeouts-map edges)
+              with-defaults      (inject-default-dispatches with-timeouts edges)
               join-dispatches    (compute-join-dispatches joins-map edges)
               effective-dispatches (merge (merge-default-dispatches with-defaults edges cell-ids)
                                           join-dispatches)]
           (v/validate-dispatch-coverage! edges effective-dispatches))
         (validate-schema-chain! edges cell-ids joins-map)
+        ;; Validate graph-level timeouts
+        (when-let [timeouts (:timeouts raw-workflow)]
+          (validate-timeouts! timeouts cells edges))
         ;; Validate constraints (after all structural validations pass)
         (when-let [constraints (:constraints raw-workflow)]
           (validate-constraints! constraints edges))))))
@@ -798,10 +892,10 @@
            joins-map (or joins {})
          ;; Determine which cells are consumed by joins
          join-members (set (mapcat :cells (vals joins-map)))
-         ;; Merge default dispatches from cell specs AND join default dispatches (filtered to edge keys)
-         ;; Also auto-inject :default catch-all predicates
-         ;; Join dispatches take priority (merged last) since joins compute their own dispatches
-         with-defaults      (inject-default-dispatches dispatches edges)
+         ;; Merge timeout, default, and join dispatches
+         timeouts-map       (or (:timeouts workflow) {})
+         with-timeouts      (inject-timeout-dispatches dispatches timeouts-map edges)
+         with-defaults      (inject-default-dispatches with-timeouts edges)
          join-dispatches    (compute-join-dispatches joins-map edges)
          effective-dispatches (merge (merge-default-dispatches with-defaults edges cell-ids)
                                      join-dispatches)
@@ -850,6 +944,8 @@
                                state->cell
                                resilience-map)
                        state->cell)
+         ;; Apply graph-level timeouts (wraps handlers with timeout logic)
+         state->cell (apply-graph-timeouts state->cell timeouts-map)
          ;; Apply workflow-level interceptors (wraps cell handlers)
          wf-interceptors (:interceptors workflow)
          state->cell (apply-workflow-interceptors state->cell cell-ids wf-interceptors)

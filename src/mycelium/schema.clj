@@ -145,15 +145,17 @@
                              (get-in state->edge-targets
                                      [state-id (:current-state-id fsm-state)]))
                 data       (:data fsm-state)
-                ;; Skip output validation when resilience error is present
-                ;; (the handler was short-circuited by the resilience wrapper)
-                error      (when-not (:mycelium/resilience-error data)
+                ;; Skip output validation when resilience error or timeout is present
+                ;; (the handler was short-circuited)
+                error      (when-not (or (:mycelium/resilience-error data)
+                                         (:mycelium/timeout data))
                              (validate-output cell data transition))
                 ;; Extract duration-ms from the latest Maestro trace segment
                 duration-ms (some-> (:trace fsm-state) last :duration-ms)
                 ;; Extract join sub-traces if present
                 join-traces (:mycelium/join-traces data)
                 halted?     (some? (:mycelium/halt data))
+                timed-out?  (some? (:mycelium/timeout data))
                 trace-entry (cond-> {:cell       (get state->names state-id)
                                      :cell-id    (:id cell)
                                      :transition transition
@@ -161,6 +163,7 @@
                               duration-ms   (assoc :duration-ms duration-ms)
                               join-traces   (assoc :join-traces join-traces)
                               halted?       (assoc :halted true)
+                              timed-out?    (assoc :timeout? true)
                               error         (assoc :error error))]
             (cond
               error
@@ -182,7 +185,7 @@
               :else
               (-> fsm-state
                   (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
-                  (update :data dissoc :mycelium/join-traces :mycelium/params))))
+                  (update :data dissoc :mycelium/join-traces :mycelium/params :mycelium/timeout))))
           fsm-state)))))
 
 (defn wrap-async-callback
