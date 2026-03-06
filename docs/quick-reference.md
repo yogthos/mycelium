@@ -561,6 +561,7 @@ Group cells into named regions in the manifest for LLM context scoping:
 - Region cells must exist in `:cells`
 - No cell may appear in multiple regions
 - `region-brief` returns cell schemas, internal edges, entry/exit points, and a prompt
+- Exit point `:transitions` is always a map — unconditional edges use `{:unconditional :target}`
 - Regions are purely informational — no runtime behavior change
 
 ## Workflow Trace
