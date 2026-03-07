@@ -424,8 +424,10 @@
    For each cell, checks its input keys are available from upstream outputs or workflow input.
    For per-transition output schemas, only passes the keys from the matching transition's schema
    along each edge.
-   Join nodes: validates each member's inputs, then adds the union of all member outputs."
-  [edges-map cells-map joins-map]
+   Join nodes: validates each member's inputs, then adds the union of all member outputs.
+   When `propagate-keys?` is true, available keys pass through cells even if not
+   declared in the cell's output schema."
+  [edges-map cells-map joins-map & {:keys [propagate-keys?]}]
   (let [get-input-keys  (fn [cell-id]
                           (let [cell   (cell/get-cell! cell-id)
                                 schema (get-in cell [:schema :input])]
@@ -924,6 +926,27 @@
 
     :else false))
 
+(defn- strip-mycelium-keys
+  "Removes :mycelium/* keys from a data map for key propagation."
+  [data]
+  (into {} (remove (fn [[k _]] (and (keyword? k) (= "mycelium" (namespace k))))) data))
+
+(defn- wrap-handler-with-propagation
+  "Wraps a cell handler so that input keys automatically propagate to output.
+   Output = (merge (strip-mycelium-keys input) (handler resources input)).
+   Handler output takes precedence over input keys.
+   Handles both sync (2-arity) and async (4-arity) handlers."
+  [handler]
+  (fn
+    ([resources data]
+     (let [result (handler resources data)]
+       (merge (strip-mycelium-keys data) result)))
+    ([resources data callback error-callback]
+     (handler resources data
+              (fn [result]
+                (callback (merge (strip-mycelium-keys data) result)))
+              error-callback))))
+
 (defn- wrap-handler-with-params
   "Wraps a cell handler to inject :mycelium/params into data before invocation.
    Handles both sync (2-arity) and async (4-arity) handlers."
@@ -1084,6 +1107,12 @@
          ;; Apply workflow-level interceptors (wraps cell handlers)
          wf-interceptors (:interceptors workflow)
          state->cell (apply-workflow-interceptors state->cell cell-ids wf-interceptors)
+         ;; Apply key propagation wrapping (merge input → output)
+         state->cell (if (:propagate-keys? opts)
+                       (into {} (map (fn [[state-id cell]]
+                                       [state-id (update cell :handler wrap-handler-with-propagation)]))
+                             state->cell)
+                       state->cell)
          ;; Build state->edge-targets for post-interceptor transition lookup
          state->edge-targets (build-edge-targets edges)
          ;; Build state->names for human-readable trace entries

@@ -558,6 +558,31 @@ Enable automatic numeric type coercion with `:coerce? true` in compilation optio
 
 Coercion handles `double→int` and `int→double` conversions automatically. Only whole-valued doubles are coerced to int (`949.0 → 949`); fractional values like `949.5` are left unconverted and fail validation normally. Non-numeric values are unaffected — a string where an int is expected still fails. Extra keys are preserved.
 
+### Auto Key Propagation
+
+Enable automatic key propagation with `:propagate-keys? true`. When enabled, each cell's handler output is merged on top of its input data — cells only need to return new or changed keys. This eliminates the boilerplate of explicitly passing through all upstream keys:
+
+```clojure
+;; Without propagation: handler must include ALL keys downstream cells need
+(defmethod cell/cell-spec :compute-tax [_]
+  {:handler (fn [_ data]
+              (assoc data :tax (* (:subtotal data) 0.1)))
+   :schema {:output [:map [:subtotal :double] [:items :any] [:tax :double]]}})
+
+;; With propagation: handler returns only new keys
+(defmethod cell/cell-spec :compute-tax [_]
+  {:handler (fn [_ data] {:tax (* (:subtotal data) 0.1)})
+   :schema {:output [:map [:tax :double]]}})
+
+(myc/run-workflow workflow-def resources data {:propagate-keys? true})
+```
+
+Handler output takes precedence over input keys. Internal `:mycelium/*` keys are excluded from propagation. Combines with `:coerce? true`:
+
+```clojure
+(myc/run-workflow workflow-def resources data {:propagate-keys? true :coerce? true})
+```
+
 ## Workflow Trace
 
 Every workflow run produces a `:mycelium/trace` vector in the result data — a step-by-step record of which cells ran, what transition was taken, and what the data looked like after each step.
