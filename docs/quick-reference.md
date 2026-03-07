@@ -1,5 +1,99 @@
 # Mycelium Quick Reference
 
+## Thinking in Mycelium
+
+A mycelium application is a directed graph where each node (cell) is a pure data
+transformation with an explicit contract. You are building a state machine: the
+manifest declares the structure, cells implement the logic.
+
+### Design Process
+
+1. **Decompose the problem into steps.** Each distinct operation becomes a cell.
+   A cell does ONE thing: validate input, look up a price, compute tax, render
+   HTML. If you're writing a cell that does two things, split it into two cells.
+
+2. **Define the data flow.** Each cell declares what keys it needs (input schema)
+   and what keys it produces (output schema). Data accumulates through the graph
+   -- every cell receives all keys produced by every upstream cell. A cell that
+   computes `:tax` can be 5 steps downstream from the cell that produced
+   `:discounted-subtotal`, and it will still receive that key.
+
+3. **Draw the graph.** Connect cells with edges. Most flows are linear pipelines.
+   Add branching where decisions are needed (fraud check: approve or reject).
+   Add join nodes where steps are independent and can run in parallel (compute
+   tax, shipping, and gift wrap concurrently).
+
+4. **Write the manifest first, then implement cells.** The manifest is the
+   architecture. It declares cells, edges, dispatches, and schemas. Once the
+   manifest compiles, each cell can be implemented independently using only its
+   schema as context -- you don't need to read any other cell's code.
+
+### Key Mental Model
+
+**The manifest is a contract, not configuration.** It's not a passive description
+of the system -- it's an executable specification that the framework validates at
+compile time. If a cell's input schema requires `:shipping-groups` but no upstream
+cell produces that key, compilation fails. This catches the class of bugs that
+traditional codebases accumulate silently.
+
+**Cells are stateless data transformations.** A cell handler receives a resources
+map (database connections, external services) and the accumulated data map. It
+returns the data map with new keys added via `assoc`. Side effects (database
+writes, API calls) go through the resources map, keeping cells testable in
+isolation.
+
+```clojure
+;; Cell handler signature:
+(fn [resources data]
+  (assoc data :tax (compute-tax (:discounted-subtotal data))))
+```
+
+**Branching is separate from computation.** Cell handlers compute data. Dispatch
+predicates examine the result and choose the edge. This separates "what happened"
+from "what to do next":
+
+```clojure
+;; The cell computes a fraud status:
+(fn [_ data] (assoc data :fraud-status (if (> (:total data) 5000) :reject :ok)))
+
+;; Dispatch predicates choose the route:
+:dispatches {:fraud [[:approved (fn [d] (not= :reject (:fraud-status d)))]
+                     [:reject   (fn [d] (= :reject (:fraud-status d)))]]}
+```
+
+**Joins declare parallelism.** When cells don't depend on each other's output,
+declare them as a join. Each member receives the same input snapshot and produces
+non-overlapping output keys. The framework runs them concurrently and merges the
+results:
+
+```clojure
+:joins {:fees {:cells [:calc-tax :calc-shipping :calc-gift-wrap] :strategy :parallel}}
+```
+
+### Structuring a Solution
+
+Given a problem like "process an order", think of it as a state machine:
+
+```
+[expand items] -> [apply discounts] -> [compute subtotal]
+    -> [calc tax | calc shipping | calc gift-wrap]  (parallel join)
+    -> [compute total] -> [fraud check]
+        -> approved: [reserve inventory] -> [process payment]
+            -> approved: [finalize] -> END
+            -> declined: [rollback] -> END
+        -> rejected: END
+```
+
+Each box is a cell. Each arrow is an edge. Each fork is a dispatch. Each parallel
+group is a join. The manifest makes this structure explicit and validates it.
+
+The manifest is also what you hand to another developer (or agent) to understand
+the system. Reading a 100-line manifest gives you the complete architecture.
+Reading 900 lines of imperative code gives you implementation details you have to
+mentally reconstruct the architecture from.
+
+---
+
 ## Core API
 
 ```clojure
