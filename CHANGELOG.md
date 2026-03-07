@@ -4,7 +4,7 @@
 
 ### Auto Key Propagation
 
-Opt-in key propagation via `:propagate-keys? true`. When enabled, each cell's output is automatically merged with its input — cells only need to return new or changed keys. Eliminates the boilerplate of explicitly passing through all upstream keys in every cell's output and output schema.
+Automatic key propagation, enabled by default. Each cell's output is automatically merged with its input — cells only need to return new or changed keys. Eliminates the boilerplate of explicitly passing through all upstream keys in every cell's output and output schema. Disable with `:propagate-keys? false` if needed.
 
 ```clojure
 ;; Before: handler must include ALL keys downstream cells need
@@ -18,10 +18,11 @@ Opt-in key propagation via `:propagate-keys? true`. When enabled, each cell's ou
   {:handler (fn [_ data] {:tax (* (:subtotal data) 0.1)})
    :schema {:output [:map [:tax :double]]}})
 
-(myc/run-workflow workflow-def resources data {:propagate-keys? true})
+;; Key propagation is on by default — no opt-in needed
+(myc/run-workflow workflow-def resources data)
 ```
 
-Handler output takes precedence over input keys (explicit override). Internal `:mycelium/*` keys are excluded from propagation. Works with both sync and async cells, and combines with `:coerce? true`.
+Handler output takes precedence over input keys (explicit override). Internal `:mycelium/*` keys are excluded from propagation. Works with both sync and async cells, and combines with `:coerce? true`. Disable with `{:propagate-keys? false}`.
 
 ### Schema Coercion
 

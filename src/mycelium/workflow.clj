@@ -1106,7 +1106,9 @@
          wf-interceptors (:interceptors workflow)
          state->cell (apply-workflow-interceptors state->cell cell-ids wf-interceptors)
          ;; Apply key propagation wrapping (merge input → output)
-         state->cell (if (:propagate-keys? opts)
+         ;; Enabled by default — aligns runtime with schema chain validator's
+         ;; key accumulation assumption. Disable with :propagate-keys? false.
+         state->cell (if (not (false? (:propagate-keys? opts)))
                        (into {} (map (fn [[state-id cell]]
                                        [state-id (update cell :handler wrap-handler-with-propagation)]))
                              state->cell)

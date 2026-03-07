@@ -5,13 +5,13 @@
 
 (use-fixtures :each (fn [f] (cell/clear-registry!) (f)))
 
-;; ===== Basic key propagation =====
+;; ===== Default behavior (enabled) =====
 
 (deftest propagate-keys-merges-input-into-output-test
-  (testing "With :propagate-keys? true, input keys automatically appear in output"
+  (testing "Input keys automatically appear in output (default behavior)"
     (defmethod cell/cell-spec :test/add-b [_]
       {:id      :test/add-b
-       ;; Handler returns ONLY :b — without propagation, :a is lost
+       ;; Handler returns ONLY :b — :a propagates automatically
        :handler (fn [_ data] {:b (inc (:a data))})
        :schema  {:input  [:map [:a :int]]
                  :output [:map [:b :int]]}})
@@ -27,8 +27,7 @@
                                  :use   {:done :end}}
                     :dispatches {:start [[:done (constantly true)]]
                                  :use   [[:done (constantly true)]]}}
-                   {} {:a 10} {:propagate-keys? true})]
-      ;; :a should propagate through :test/add-b to :test/use-both
+                   {} {:a 10})]
       (is (= 21 (:result result))))))
 
 (deftest propagate-keys-handler-output-takes-precedence-test
@@ -50,15 +49,39 @@
                                  :read  {:done :end}}
                     :dispatches {:start [[:done (constantly true)]]
                                  :read  [[:done (constantly true)]]}}
-                   {} {:x 10} {:propagate-keys? true})]
+                   {} {:x 10})]
       ;; handler output :x=11 should override input :x=10
       (is (= 110 (:result result))))))
 
-(deftest propagate-keys-disabled-by-default-test
-  (testing "Without :propagate-keys?, cells must explicitly include keys in output"
+(deftest propagate-keys-enabled-by-default-test
+  (testing "Key propagation is on by default — no opt-in needed"
     (defmethod cell/cell-spec :test/add-b [_]
       {:id      :test/add-b
-       ;; Handler returns ONLY :b — :a is lost
+       :handler (fn [_ data] {:b (inc (:a data))})
+       :schema  {:input  [:map [:a :int]]
+                 :output [:map [:b :int]]}})
+    (defmethod cell/cell-spec :test/use-both [_]
+      {:id      :test/use-both
+       :handler (fn [_ data] {:result (+ (:a data) (:b data))})
+       :schema  {:input  [:map [:a :int] [:b :int]]
+                 :output [:map [:result :int]]}})
+    (let [result (myc/run-workflow
+                   {:cells      {:start :test/add-b
+                                 :use   :test/use-both}
+                    :edges      {:start {:done :use}
+                                 :use   {:done :end}}
+                    :dispatches {:start [[:done (constantly true)]]
+                                 :use   [[:done (constantly true)]]}}
+                   {} {:a 10})]
+      ;; :a propagates even without explicit :propagate-keys? true
+      (is (= 21 (:result result))))))
+
+;; ===== Opt-out =====
+
+(deftest propagate-keys-can-be-disabled-test
+  (testing "With :propagate-keys? false, keys are not propagated"
+    (defmethod cell/cell-spec :test/add-b [_]
+      {:id      :test/add-b
        :handler (fn [_ data] {:b (inc (:a data))})
        :schema  {:input  [:map [:a :int]]
                  :output [:map [:b :int]]}})
@@ -67,8 +90,6 @@
        :handler (fn [_ data] {:result (+ (or (:a data) 0) (:b data))})
        :schema  {:input  [:map [:a :int] [:b :int]]
                  :output [:map [:result :int]]}})
-    ;; Without propagate-keys?, input validation on :use will fail
-    ;; because :a is not in the data (only :b is)
     (let [on-error (fn [_resources fsm-state] (:data fsm-state))
           result (myc/run-workflow
                    {:cells      {:start :test/add-b
@@ -77,8 +98,8 @@
                                  :use   {:done :end}}
                     :dispatches {:start [[:done (constantly true)]]
                                  :use   [[:done (constantly true)]]}}
-                   {} {:a 10} {:on-error on-error})]
-      ;; :a was lost because propagation is off — input validation on :use should fail
+                   {} {:a 10} {:propagate-keys? false :on-error on-error})]
+      ;; :a is lost — input validation on :use fails
       (is (some? (:mycelium/schema-error result)))
       (is (= :input (:phase (:mycelium/schema-error result)))))))
 
@@ -112,14 +133,14 @@
                     :dispatches {:start [[:done (constantly true)]]
                                  :b     [[:done (constantly true)]]
                                  :c     [[:done (constantly true)]]}}
-                   {} {:x 100} {:propagate-keys? true})]
+                   {} {:x 100})]
       ;; :x propagates through all cells, :a-out through step-b and step-c
       (is (= 103 (:result result))))))
 
-;; ===== Pre-compile with propagate-keys? =====
+;; ===== Pre-compile =====
 
 (deftest propagate-keys-with-pre-compile-test
-  (testing "propagate-keys? works with pre-compile"
+  (testing "Key propagation works with pre-compile (default on)"
     (defmethod cell/cell-spec :test/add-b [_]
       {:id      :test/add-b
        :handler (fn [_ data] {:b (inc (:a data))})
@@ -136,15 +157,14 @@
                       :edges      {:start {:done :use}
                                    :use   {:done :end}}
                       :dispatches {:start [[:done (constantly true)]]
-                                   :use   [[:done (constantly true)]]}}
-                     {:propagate-keys? true})
+                                   :use   [[:done (constantly true)]]}})
           result (myc/run-compiled compiled {} {:a 10})]
       (is (= 21 (:result result))))))
 
 ;; ===== Schema validation still works =====
 
 (deftest propagate-keys-schema-validation-still-enforced-test
-  (testing "Output schema validation still catches bad handler output with propagate-keys?"
+  (testing "Output schema validation still catches bad handler output"
     (defmethod cell/cell-spec :test/bad-output [_]
       {:id      :test/bad-output
        :handler (fn [_ data] {:count "not-an-int"})
@@ -163,14 +183,13 @@
                                  :next  {:done :end}}
                     :dispatches {:start [[:done (constantly true)]]
                                  :next  [[:done (constantly true)]]}}
-                   {} {:x 42} {:propagate-keys? true :on-error on-error})]
-      ;; Output schema validation should still catch "not-an-int" for :count
+                   {} {:x 42} {:on-error on-error})]
       (is (some? (:mycelium/schema-error result))))))
 
-;; ===== Coercion + propagate-keys? combined =====
+;; ===== Coercion + propagation combined =====
 
 (deftest propagate-keys-with-coercion-test
-  (testing "propagate-keys? and coerce? work together"
+  (testing "Key propagation and coercion work together"
     (defmethod cell/cell-spec :test/produce-double [_]
       {:id      :test/produce-double
        :handler (fn [_ data] {:count 10.0})
@@ -188,7 +207,7 @@
                                  :use   {:done :end}}
                     :dispatches {:start [[:done (constantly true)]]
                                  :use   [[:done (constantly true)]]}}
-                   {} {:x 5} {:propagate-keys? true :coerce? true})]
+                   {} {:x 5} {:coerce? true})]
       (is (= 15 (:result result))))))
 
 ;; ===== Propagated keys visible in final result =====
@@ -203,7 +222,7 @@
     (let [result (myc/run-workflow
                    {:cells      {:start :test/add-tag}
                     :edges      {:start :end}}
-                   {} {:x 42} {:propagate-keys? true})]
+                   {} {:x 42})]
       ;; Both :x (propagated) and :tag (handler output) should be present
       (is (= 42 (:x result)))
       (is (= "processed" (:tag result))))))

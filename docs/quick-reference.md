@@ -152,7 +152,7 @@ mentally reconstruct the architecture from.
  :on-error (fn [resources fsm-state] data)        ;; runs when FSM enters error state
  :on-end   (fn [resources fsm-state] data)        ;; runs when FSM enters end state
  :coerce?  true                                    ;; auto-coerce numeric types (int↔double)
- :propagate-keys? true}                            ;; auto-merge input keys into handler output
+ :propagate-keys? false}                            ;; disable auto key propagation (on by default)
 ```
 
 ## Accumulating Data Model
@@ -166,7 +166,7 @@ start → validate → fetch-profile → fetch-orders → render
 
 A cell can depend on data produced several steps earlier without special wiring — keys persist through intermediate cells. The schema chain validator walks each path and confirms required keys are available from upstream outputs.
 
-With `:propagate-keys? true`, cells can return only new/changed keys — input keys are automatically merged into the output. This eliminates the `(assoc data ...)` boilerplate:
+Key propagation is on by default — cells can return only new/changed keys and input keys are automatically merged into the output. This eliminates the `(assoc data ...)` boilerplate:
 
 ```clojure
 ;; Without propagation: (fn [_ data] (assoc data :tax (* (:subtotal data) 0.1)))

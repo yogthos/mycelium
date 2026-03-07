@@ -560,7 +560,7 @@ Coercion handles `double→int` and `int→double` conversions automatically. On
 
 ### Auto Key Propagation
 
-Enable automatic key propagation with `:propagate-keys? true`. When enabled, each cell's handler output is merged on top of its input data — cells only need to return new or changed keys. This eliminates the boilerplate of explicitly passing through all upstream keys:
+Key propagation is enabled by default. Each cell's handler output is merged on top of its input data — cells only need to return new or changed keys. This eliminates the boilerplate of explicitly passing through all upstream keys:
 
 ```clojure
 ;; Without propagation: handler must include ALL keys downstream cells need
@@ -574,14 +574,11 @@ Enable automatic key propagation with `:propagate-keys? true`. When enabled, eac
   {:handler (fn [_ data] {:tax (* (:subtotal data) 0.1)})
    :schema {:output [:map [:tax :double]]}})
 
-(myc/run-workflow workflow-def resources data {:propagate-keys? true})
+;; Key propagation is on by default — no opt-in needed
+(myc/run-workflow workflow-def resources data)
 ```
 
-Handler output takes precedence over input keys. Internal `:mycelium/*` keys are excluded from propagation. Combines with `:coerce? true`:
-
-```clojure
-(myc/run-workflow workflow-def resources data {:propagate-keys? true :coerce? true})
-```
+Handler output takes precedence over input keys. Internal `:mycelium/*` keys are excluded from propagation. Disable with `{:propagate-keys? false}` if needed.
 
 ## Workflow Trace
 
