@@ -14,7 +14,7 @@
     (handle-success result)))
 ```
 
-Error types: `:schema/input`, `:schema/output`, `:handler`, `:resilience/timeout`, `:resilience/circuit-open`, `:join`, `:timeout`, `:input`. All return a consistent map with `:error-type`, `:message`, and `:details`.
+Error types: `:schema/input`, `:schema/output`, `:handler`, `:resilience/timeout`, `:resilience/circuit-open`, `:resilience/bulkhead-full`, `:resilience/rate-limited`, `:join`, `:timeout`, `:input`. All return a consistent map with `:error-type`, `:message`, and `:details`.
 
 ### Live Execution Tracing
 

@@ -601,6 +601,8 @@ Use `workflow-error` and `error?` for consistent error handling instead of check
 | `:handler` | Cell handler threw an exception (error groups) |
 | `:resilience/timeout` | Resilience timeout policy triggered |
 | `:resilience/circuit-open` | Circuit breaker is open |
+| `:resilience/bulkhead-full` | Bulkhead capacity exhausted |
+| `:resilience/rate-limited` | Rate limiter rejected the call |
 | `:join` | One or more join members failed |
 | `:timeout` | Graph-level timeout |
 | `:input` | Workflow-level input schema validation failed |

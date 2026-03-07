@@ -852,4 +852,4 @@ Instead of checking individual keys, use `workflow-error` and `error?`:
                               ;;     :message "...", :details {...}} or nil
 ```
 
-Error types: `:schema/input`, `:schema/output`, `:handler`, `:resilience/*`, `:join`, `:timeout`, `:input`.
+Error types: `:schema/input`, `:schema/output`, `:handler`, `:resilience/timeout`, `:resilience/circuit-open`, `:resilience/bulkhead-full`, `:resilience/rate-limited`, `:join`, `:timeout`, `:input`.
