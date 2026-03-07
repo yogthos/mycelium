@@ -528,7 +528,21 @@ Pre and post interceptors validate every transition automatically:
 - **Pre**: validates input data against the cell's `:input` schema before the handler runs
 - **Post**: validates output data against `:output` schema, using the dispatch target to select per-transition schemas
 
-Schema violations redirect to the error state with detailed diagnostics attached at `:mycelium/schema-error`.
+Schema violations redirect to the error state with diagnostics attached at `:mycelium/schema-error`:
+
+```clojure
+{:cell-id     :order/compute-tax
+ :phase       :input
+ :errors      {:amount ["should be an integer"]}
+ :failed-keys {:amount {:value 42.5, :type "java.lang.Double",
+                         :message "should be an integer"}}
+ :cell-path   [:validate :expand-items :apply-promotions]
+ :data        {:amount 42.5, :order-id "ORD-1"}}
+```
+
+- **`:failed-keys`** shows the actual value, its type, and the error for each failing key
+- **`:cell-path`** lists which cells ran before the failure
+- **`:data`** excludes internal `:mycelium/*` keys to reduce noise
 
 ### Schema Coercion
 

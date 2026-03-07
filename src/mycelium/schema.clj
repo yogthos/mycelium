@@ -10,6 +10,36 @@
 (def ^:private terminal-states
   #{::fsm/end ::fsm/error ::fsm/halt})
 
+(defn- strip-mycelium-keys
+  "Removes :mycelium/* keys from a data map to reduce error payload noise."
+  [data]
+  (into {} (remove (fn [[k _]] (and (keyword? k)
+                                     (= "mycelium" (namespace k)))))
+        data))
+
+(defn- build-failed-keys
+  "Builds a map of {key {:value v, :type type-name, :message msg}} from
+   Malli's humanized errors and the original data."
+  [humanized data]
+  (when (map? humanized)
+    (into {}
+          (map (fn [[k msgs]]
+                 (let [v (get data k)]
+                   [k {:value   v
+                       :type    (when (some? v) (.getName (class v)))
+                       :message (first msgs)}])))
+          humanized)))
+
+(defn- build-error-map
+  "Builds a schema error map with enriched diagnostics."
+  [cell-id phase explanation data]
+  (let [humanized (me/humanize explanation)]
+    (cond-> {:cell-id     cell-id
+             :phase       phase
+             :errors      humanized
+             :data        (strip-mycelium-keys data)}
+      (map? humanized) (assoc :failed-keys (build-failed-keys humanized data)))))
+
 (defn validate-input
   "Validates data against the cell's input schema.
    Returns nil if valid (or if no input schema is defined), or an error map if invalid.
@@ -17,10 +47,7 @@
   [cell data]
   (when-let [schema (get-in cell [:schema :input])]
     (when-let [explanation (m/explain schema data)]
-      {:cell-id (:id cell)
-       :phase   :input
-       :errors  (me/humanize explanation)
-       :data    data})))
+      (build-error-map (:id cell) :input explanation data))))
 
 (defn output-schema-for-transition
   "Returns the output schema for a specific transition of a cell.
@@ -55,10 +82,7 @@
          ;; Validate against the specific transition's schema
          (when-let [schema (get output transition)]
            (when-let [explanation (m/explain schema data)]
-             {:cell-id (:id cell)
-              :phase   :output
-              :errors  (me/humanize explanation)
-              :data    data}))
+             (build-error-map (:id cell) :output explanation data)))
          ;; No transition known — validate against all schemas, pass if any matches
          (let [schemas (vals output)]
            (when (every? (fn [schema]
@@ -67,15 +91,12 @@
              {:cell-id (:id cell)
               :phase   :output
               :errors  (str "Data does not match any output schema for " (:id cell))
-              :data    data})))
+              :data    (strip-mycelium-keys data)})))
 
        ;; Single schema (vector or keyword)
        :else
        (when-let [explanation (m/explain output data)]
-         {:cell-id (:id cell)
-          :phase   :output
-          :errors  (me/humanize explanation)
-          :data    data})))))
+         (build-error-map (:id cell) :output explanation data))))))
 
 ;; ===== Schema coercion =====
 
@@ -96,10 +117,7 @@
       {:data data}
       (let [coerced (m/decode schema data number-coercion-transformer)]
         (if-let [explanation (m/explain schema coerced)]
-          {:error {:cell-id (:id cell)
-                   :phase   :input
-                   :errors  (me/humanize explanation)
-                   :data    data}}
+          {:error (build-error-map (:id cell) :input explanation data)}
           {:data coerced})))))
 
 (defn coerce-output
@@ -119,10 +137,7 @@
          (if-let [schema (get output transition)]
            (let [coerced (m/decode schema data number-coercion-transformer)]
              (if-let [explanation (m/explain schema coerced)]
-               {:error {:cell-id (:id cell)
-                        :phase   :output
-                        :errors  (me/humanize explanation)
-                        :data    data}}
+               {:error (build-error-map (:id cell) :output explanation data)}
                {:data coerced}))
            {:data data})
          ;; No transition — try each schema, use first that matches after coercion
@@ -135,15 +150,12 @@
              {:error {:cell-id (:id cell)
                       :phase   :output
                       :errors  (str "Data does not match any output schema for " (:id cell))
-                      :data    data}})))
+                      :data    (strip-mycelium-keys data)}})))
 
        :else
        (let [coerced (m/decode output data number-coercion-transformer)]
          (if-let [explanation (m/explain output coerced)]
-           {:error {:cell-id (:id cell)
-                    :phase   :output
-                    :errors  (me/humanize explanation)
-                    :data    data}}
+           {:error (build-error-map (:id cell) :output explanation data)}
            {:data coerced}))))))
 
 (defn- compile-schema-value
@@ -178,6 +190,18 @@
                  [state-id updated-cell])))
         state->cell))
 
+(defn- extract-cell-path
+  "Extracts a vector of cell names from the :mycelium/trace in data."
+  [data]
+  (mapv :cell (:mycelium/trace data)))
+
+(defn- attach-cell-path
+  "Attaches :cell-path to an error map based on the current trace."
+  [error data]
+  (let [path (extract-cell-path data)]
+    (cond-> error
+      (seq path) (assoc :cell-path path))))
+
 (defn make-pre-interceptor
   "Creates a Maestro pre-interceptor that validates input schemas.
    `state->cell` is a map of state-id → cell-spec.
@@ -196,12 +220,14 @@
                  (if (:error result)
                    (-> fsm-state
                        (assoc :current-state-id ::fsm/error)
-                       (assoc-in [:data :mycelium/schema-error] (:error result)))
+                       (assoc-in [:data :mycelium/schema-error]
+                                 (attach-cell-path (:error result) (:data fsm-state))))
                    (assoc fsm-state :data (:data result))))
                (if-let [error (validate-input cell (:data fsm-state))]
                  (-> fsm-state
                      (assoc :current-state-id ::fsm/error)
-                     (assoc-in [:data :mycelium/schema-error] error))
+                     (assoc-in [:data :mycelium/schema-error]
+                               (attach-cell-path error (:data fsm-state))))
                  fsm-state))
              fsm-state)))))))
 
@@ -265,7 +291,8 @@
                      (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
                      (update :data dissoc :mycelium/join-traces :mycelium/params)
                      (assoc :current-state-id ::fsm/error)
-                     (assoc-in [:data :mycelium/schema-error] error))
+                     (assoc-in [:data :mycelium/schema-error]
+                               (attach-cell-path error (:data fsm-state))))
 
                  halted?
                  (-> fsm-state
