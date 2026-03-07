@@ -611,6 +611,24 @@ Each trace entry contains:
 
 Data snapshots exclude `:mycelium/trace` itself to avoid recursive nesting.
 
+### Live Tracing with `:on-trace`
+
+Pass an `:on-trace` callback to observe execution in real time — no more `println` in handlers:
+
+```clojure
+;; Custom callback — receives each trace entry as it's produced
+(myc/run-workflow workflow-def resources data
+  {:on-trace (fn [{:keys [cell cell-id transition duration-ms]}]
+               (println cell "->" transition (str "[" duration-ms "ms]")))})
+
+;; Built-in logger for quick REPL debugging
+(require '[mycelium.dev :as dev])
+(myc/run-workflow workflow-def resources data {:on-trace (dev/trace-logger)})
+
+;; Format a completed trace for display
+(println (dev/format-trace (:mycelium/trace result)))
+```
+
 ### Asserting on Traces in Tests
 
 ```clojure
