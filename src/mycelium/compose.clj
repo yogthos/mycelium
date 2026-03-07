@@ -15,46 +15,39 @@
                    [(first entry) (second entry)]))
                (rest schema)))))
 
+(defn- output-entries-for-edge
+  "Extracts [key type] entries from a cell's output schema for edges routing to :end."
+  [output edge-def]
+  (cond
+    ;; Unconditional edge to :end
+    (= :end edge-def)
+    (cond
+      (vector? output) (get-map-entries output)
+      (map? output)    (mapcat (fn [[_ s]] (or (get-map-entries s) [])) output))
+
+    ;; Map edges — collect entries from transitions routing to :end
+    (map? edge-def)
+    (let [end-transitions (keep (fn [[transition target]]
+                                  (when (= :end target) transition))
+                                edge-def)]
+      (when (seq end-transitions)
+        (cond
+          (vector? output) (get-map-entries output)
+          (map? output)    (mapcat (fn [t]
+                                     (or (some-> (get output t) get-map-entries) []))
+                                   end-transitions))))))
+
 (defn- collect-end-reaching-output-entries
   "Walks workflow edges to find cells routing to :end and collects their output entries.
    Returns a vector of [key type] pairs representing the union of all outputs."
   [edges cells]
-  (let [entries (atom {})]
-    (doseq [[cell-name edge-def] edges]
-      (let [cell-id (get cells cell-name)]
-        (when cell-id
-          (let [cell (cell/get-cell cell-id)
-                output (when cell (get-in cell [:schema :output]))]
-            (when output
-              (cond
-                ;; Unconditional edge to :end
-                (= :end edge-def)
-                (when-let [es (cond
-                                (vector? output) (get-map-entries output)
-                                (map? output) (mapcat (fn [[_ s]] (or (get-map-entries s) [])) output))]
-                  (doseq [[k t] es]
-                    (swap! entries (fn [m] (if (contains? m k) m (assoc m k t))))))
-
-                ;; Map edges — check which transitions route to :end
-                (map? edge-def)
-                (let [end-transitions (set (keep (fn [[transition target]]
-                                                   (when (= :end target) transition))
-                                                 edge-def))]
-                  (when (seq end-transitions)
-                    (let [es (cond
-                               ;; vector output: all transitions share the same schema
-                               (vector? output)
-                               (get-map-entries output)
-
-                               ;; map output: only take entries from transitions routing to :end
-                               (map? output)
-                               (mapcat (fn [t]
-                                         (when-let [s (get output t)]
-                                           (or (get-map-entries s) [])))
-                                       end-transitions))]
-                      (doseq [[k t] es]
-                        (swap! entries (fn [m] (if (contains? m k) m (assoc m k t))))))))))))))
-    (vec @entries)))
+  (->> edges
+       (mapcat (fn [[cell-name edge-def]]
+                 (when-let [cell (some-> (get cells cell-name) cell/get-cell)]
+                   (some-> (get-in cell [:schema :output])
+                           (output-entries-for-edge edge-def)))))
+       (reduce (fn [m [k t]] (if (contains? m k) m (assoc m k t))) {})
+       vec))
 
 (defn- infer-workflow-output-schema
   "Infers a per-transition output schema for a composed cell.
@@ -79,7 +72,7 @@
 (def workflow-cell-dispatches
   "Default dispatch predicates for composed workflow cells.
    Ordered vector — :success checked first, :failure as fallback."
-  [[:success (fn [data] (not (:mycelium/error data)))]
+  [[:success (fn [data] (nil? (:mycelium/error data)))]
    [:failure (fn [data] (some? (:mycelium/error data)))]])
 
 (defn workflow->cell

@@ -179,10 +179,10 @@
         (mapv (fn [[cell-name cell-def]]
                 (let [cell-id (:id cell-def)
                       cell    (cell/get-cell cell-id)]
-                  (if cell
+                  (if-not cell
+                    {:id cell-id :name cell-name :status :pending}
                     (try
-                      (let [input  (generate-test-input cell)
-                            result (test-cell cell-id {:input     input
+                      (let [result (test-cell cell-id {:input     (generate-test-input cell)
                                                        :resources {}})]
                         {:id     cell-id
                          :name   cell-name
@@ -192,16 +192,14 @@
                         {:id     cell-id
                          :name   cell-name
                          :status :failing
-                         :error  (ex-message e)}))
-                    {:id     cell-id
-                     :name   cell-name
-                     :status :pending})))
-              cells)]
+                         :error  (ex-message e)})))))
+              cells)
+        counts (frequencies (map :status cell-statuses))]
     {:total       (count cell-statuses)
-     :implemented (count (filter #(not= :pending (:status %)) cell-statuses))
-     :passing     (count (filter #(= :passing (:status %)) cell-statuses))
-     :failing     (count (filter #(= :failing (:status %)) cell-statuses))
-     :pending     (count (filter #(= :pending (:status %)) cell-statuses))
+     :implemented (- (count cell-statuses) (get counts :pending 0))
+     :passing     (get counts :passing 0)
+     :failing     (get counts :failing 0)
+     :pending     (get counts :pending 0)
      :cells       cell-statuses}))
 
 (defn analyze-workflow

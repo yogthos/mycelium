@@ -158,36 +158,29 @@
         has-decorators? (or r cb bh rl)
         async? (:async? opts)
         async-timeout-ms (:async-timeout-ms policies)
+        make-supplier (fn [resources data]
+                        (reify Supplier
+                          (get [_] (invoke-handler-sync handler async? resources data async-timeout-ms))))
+        decorators {:circuit-breaker cb :retry r :bulkhead bh :rate-limiter rl}
         invoke (fn [resources data]
                  (try
-                   (if tl
-                     ;; Timeout requires CompletableFuture path
-                     (if has-decorators?
-                       (let [supplier (reify Supplier
-                                        (get [_] (invoke-handler-sync handler async? resources data async-timeout-ms)))
-                             decorated (wrap-with-decorators supplier
-                                         {:circuit-breaker cb :retry r
-                                          :bulkhead bh :rate-limiter rl})
+                   (let [supplier (make-supplier resources data)]
+                     (cond
+                       (and tl has-decorators?)
+                       (let [decorated (wrap-with-decorators supplier decorators)
                              future-supplier (reify Supplier
-                                               (get [_]
-                                                 (CompletableFuture/supplyAsync decorated)))]
+                                               (get [_] (CompletableFuture/supplyAsync decorated)))]
                          (.executeFutureSupplier tl future-supplier))
-                       ;; Timeout only
+
+                       tl
                        (let [future-supplier (reify Supplier
-                                               (get [_]
-                                                 (CompletableFuture/supplyAsync
-                                                   (reify Supplier
-                                                     (get [_] (invoke-handler-sync handler async? resources data async-timeout-ms))))))]
-                         (.executeFutureSupplier tl future-supplier)))
-                     ;; No timeout — use synchronous decorator path
-                     (if has-decorators?
-                       (let [supplier (reify Supplier
-                                        (get [_] (invoke-handler-sync handler async? resources data async-timeout-ms)))
-                             decorated (wrap-with-decorators supplier
-                                         {:circuit-breaker cb :retry r
-                                          :bulkhead bh :rate-limiter rl})]
-                         (.get decorated))
-                       ;; No policies at all — shouldn't happen, but return normally
+                                               (get [_] (CompletableFuture/supplyAsync supplier)))]
+                         (.executeFutureSupplier tl future-supplier))
+
+                       has-decorators?
+                       (.get (wrap-with-decorators supplier decorators))
+
+                       :else
                        (invoke-handler-sync handler async? resources data async-timeout-ms)))
                    (catch Exception e
                      (assoc data :mycelium/resilience-error

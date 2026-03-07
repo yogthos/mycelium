@@ -955,11 +955,8 @@
     ([resources data callback error-callback]
      (handler resources (assoc data :mycelium/params params) callback error-callback))))
 
-(defn- apply-pres [data pres]
-  (reduce (fn [d pre-fn] (pre-fn d)) data pres))
-
-(defn- apply-posts [data posts]
-  (reduce (fn [d post-fn] (post-fn d)) data posts))
+(defn- apply-interceptor-fns [data fns]
+  (reduce #(%2 %1) data fns))
 
 (defn- wrap-handler-with-interceptors
   "Wraps a cell handler with matching workflow-level interceptors.
@@ -973,16 +970,16 @@
       (fn
         ;; Sync: (fn [resources data] -> data)
         ([resources data]
-         (let [data'   (if pres (apply-pres data pres) data)
+         (let [data'   (if pres (apply-interceptor-fns data pres) data)
                result  (handler resources data')
-               result' (if posts (apply-posts result posts) result)]
+               result' (if posts (apply-interceptor-fns result posts) result)]
            result'))
         ;; Async: (fn [resources data callback error-callback])
         ([resources data callback error-callback]
-         (let [data' (if pres (apply-pres data pres) data)]
+         (let [data' (if pres (apply-interceptor-fns data pres) data)]
            (handler resources data'
                     (fn [result]
-                      (callback (if posts (apply-posts result posts) result)))
+                      (callback (if posts (apply-interceptor-fns result posts) result)))
                     error-callback)))))))
 
 (defn- apply-workflow-interceptors

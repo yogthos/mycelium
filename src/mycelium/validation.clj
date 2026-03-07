@@ -35,6 +35,28 @@
     :else
     (validate-malli-schema! output-schema label)))
 
+;; ===== Cell definition validation =====
+
+(defn validate-cell-def!
+  "Validates a single cell definition (manifest or fragment).
+   Checks :id and :schema presence, validates Malli schemas.
+   Skips schema validation for :schema :inherit (resolved separately).
+   `context` is a string prefix for error messages (e.g. \"Cell\" or \"Fragment cell\")."
+  [cell-name cell-def context]
+  (when-not (:id cell-def)
+    (throw (ex-info (str context " " cell-name " missing :id") {:cell-name cell-name})))
+  (when-not (:schema cell-def)
+    (throw (ex-info (str context " " cell-name " missing :schema") {:cell-name cell-name})))
+  (when-not (= :inherit (:schema cell-def))
+    (let [input  (get-in cell-def [:schema :input])
+          output (get-in cell-def [:schema :output])]
+      (when-not input
+        (throw (ex-info (str context " " cell-name " missing :schema :input") {:cell-name cell-name})))
+      (when-not output
+        (throw (ex-info (str context " " cell-name " missing :schema :output") {:cell-name cell-name})))
+      (validate-malli-schema! input (str cell-name " :input"))
+      (validate-output-schema! output (str cell-name " :output")))))
+
 ;; ===== Edge target validation =====
 
 (defn validate-edge-targets!
