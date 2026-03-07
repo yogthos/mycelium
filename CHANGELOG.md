@@ -15,6 +15,29 @@ Automatic numeric type coercion via `:coerce? true` in compilation options. Elim
 
 Fractional values like `949.5` are never silently truncated — only whole-valued doubles (`949.0`) are coerced. Uses Malli's built-in `json-transformer` under the hood. New public functions in `mycelium.schema`: `coerce-input`, `coerce-output`.
 
+### Improved Schema Error Messages
+
+Schema validation errors now include enriched diagnostics:
+
+- **`:failed-keys`** — per-key map showing the actual `:value`, its Java `:type`, and the error `:message`
+- **`:cell-path`** — vector of cell names that executed before the failure
+- **`:data`** — stripped of `:mycelium/*` internal keys to reduce noise
+
+```clojure
+;; Before:
+{:cell-id :step-b, :phase :input,
+ :errors {:count ["should be an integer"]},
+ :data {:count 42.5, :mycelium/trace [...200 lines...]}}
+
+;; After:
+{:cell-id :step-b, :phase :input,
+ :errors {:count ["should be an integer"]},
+ :data {:count 42.5},
+ :failed-keys {:count {:value 42.5, :type "java.lang.Double",
+                        :message "should be an integer"}},
+ :cell-path [:start]}
+```
+
 ## 2026-03-06
 
 ### WorkflowStore Persistence Protocol

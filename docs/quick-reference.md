@@ -823,7 +823,7 @@ Implement the protocol for your persistence backend (DB, Redis, etc.):
 |-----|-------------|
 | `:mycelium/trace` | Vector of execution trace entries (see Workflow Trace) |
 | `:mycelium/input-error` | Input schema validation failure (workflow didn't run) |
-| `:mycelium/schema-error` | Runtime schema violation details |
+| `:mycelium/schema-error` | Runtime schema violation details (includes `:failed-keys`, `:cell-path`, clean `:data`) |
 | `:mycelium/join-error` | Join node error details |
 | `:mycelium/timeout` | `true` when a cell exceeded its graph-level timeout |
 | `:mycelium/error` | Error group error details (`{:cell :name, :message "..."}`) |
