@@ -404,5 +404,6 @@
    Use with :on-trace opt in run-workflow or pre-compile.
    Example: (myc/run-workflow wf res data {:on-trace (dev/trace-logger)})"
   []
-  (fn [entry]
-    (println (format-trace-entry 0 entry))))
+  (let [counter (atom -1)]
+    (fn [entry]
+      (println (format-trace-entry (swap! counter inc) entry)))))

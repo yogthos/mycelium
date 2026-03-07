@@ -57,7 +57,10 @@
      :pre  — additional pre-interceptor (fn [fsm-state resources] -> fsm-state)
      :post — additional post-interceptor (fn [fsm-state resources] -> fsm-state)
      :on-error — custom error handler
-     :on-end   — custom end handler"
+     :on-end   — custom end handler
+     :coerce?  — auto-coerce numeric types (int↔double)
+     :propagate-keys? — auto-merge input keys into handler output (default true)
+     :on-trace — callback (fn [trace-entry]) called after each cell completes"
   ([workflow-def] (pre-compile workflow-def {}))
   ([workflow-def opts]
    (let [compiled-fsm (compile-workflow workflow-def opts)
@@ -153,7 +156,10 @@
      :pre  — additional pre-interceptor (fn [fsm-state resources] -> fsm-state)
      :post — additional post-interceptor (fn [fsm-state resources] -> fsm-state)
      :on-error — custom error handler
-     :on-end   — custom end handler"
+     :on-end   — custom end handler
+     :coerce?  — auto-coerce numeric types (int↔double)
+     :propagate-keys? — auto-merge input keys into handler output (default true)
+     :on-trace — callback (fn [trace-entry]) called after each cell completes"
   ([workflow-def]
    (run-workflow workflow-def {} {} {}))
   ([workflow-def resources]
