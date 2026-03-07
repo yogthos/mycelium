@@ -239,12 +239,15 @@
    used to infer which transition was taken from :current-state-id (set by Maestro
    after dispatch evaluation).
    `state->names` maps resolved-state-id → cell-name keyword for human-readable traces.
-   `opts` — optional map. When `:coerce?` is true, coerces output data before validation.
+   `opts` — optional map:
+     `:coerce?`  — when true, coerces output data before validation.
+     `:on-trace` — callback `(fn [trace-entry])` called after each cell completes.
    Skips terminal states."
   ([state->cell state->edge-targets state->names]
    (make-post-interceptor state->cell state->edge-targets state->names {}))
   ([state->cell state->edge-targets state->names opts]
-   (let [coerce? (:coerce? opts)]
+   (let [coerce?  (:coerce? opts)
+         on-trace (:on-trace opts)]
      (fn [fsm-state _resources]
        (let [state-id (:last-state-id fsm-state)]
          (if (or (nil? state-id)
@@ -285,6 +288,7 @@
                                  halted?       (assoc :halted true)
                                  timed-out?    (assoc :timeout? true)
                                  error         (assoc :error error))]
+               (when on-trace (on-trace trace-entry))
                (cond
                  error
                  (-> fsm-state

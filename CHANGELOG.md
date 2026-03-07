@@ -2,6 +2,21 @@
 
 ## 2026-03-07
 
+### Live Execution Tracing
+
+`:on-trace` callback for real-time observation of workflow execution. Called after each cell completes with the trace entry (cell name, cell-id, transition, duration, data snapshot, errors). No more `println` in handlers.
+
+```clojure
+;; Custom callback
+(myc/run-workflow wf resources data
+  {:on-trace (fn [entry] (log/info (:cell entry) (:duration-ms entry)))})
+
+;; Built-in logger for REPL debugging
+(myc/run-workflow wf resources data {:on-trace (dev/trace-logger)})
+```
+
+Also adds `dev/format-trace` to pretty-print a `:mycelium/trace` vector after the fact.
+
 ### Auto Key Propagation
 
 Automatic key propagation, enabled by default. Each cell's output is automatically merged with its input — cells only need to return new or changed keys. Eliminates the boilerplate of explicitly passing through all upstream keys in every cell's output and output schema. Disable with `:propagate-keys? false` if needed.

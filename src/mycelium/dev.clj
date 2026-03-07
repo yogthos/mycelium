@@ -372,3 +372,38 @@
                             (swap! queue conj [target after])))))))))))
         (recur)))
     @result))
+
+(defn- format-trace-entry
+  "Formats a single trace entry as a human-readable string."
+  [idx entry]
+  (let [cell      (:cell entry)
+        cell-id   (:cell-id entry)
+        transition (:transition entry)
+        dur       (:duration-ms entry)
+        error     (:error entry)
+        halted    (:halted entry)
+        timed-out (:timeout? entry)]
+    (str (inc idx) ". " cell " (" cell-id ")"
+         (when transition (str " -> " transition))
+         (when dur (str " [" (format "%.2f" (double dur)) "ms]"))
+         (when halted " [HALTED]")
+         (when timed-out " [TIMEOUT]")
+         (when error
+           (str "\n   ERROR: " (:errors error))))))
+
+(defn format-trace
+  "Formats a :mycelium/trace vector into a human-readable string.
+   Each step shows: cell name, cell-id, transition, duration, and errors."
+  [trace]
+  (if (seq trace)
+    (str/join "\n" (map-indexed format-trace-entry trace))
+    "(empty trace)"))
+
+(defn trace-logger
+  "Returns an :on-trace callback that prints each trace entry to stdout.
+   Use with :on-trace opt in run-workflow or pre-compile.
+   Example: (myc/run-workflow wf res data {:on-trace (dev/trace-logger)})"
+  []
+  (let [counter (atom -1)]
+    (fn [entry]
+      (println (format-trace-entry (swap! counter inc) entry)))))

@@ -152,7 +152,8 @@ mentally reconstruct the architecture from.
  :on-error (fn [resources fsm-state] data)        ;; runs when FSM enters error state
  :on-end   (fn [resources fsm-state] data)        ;; runs when FSM enters end state
  :coerce?  true                                    ;; auto-coerce numeric types (int↔double)
- :propagate-keys? false}                            ;; disable auto key propagation (on by default)
+ :propagate-keys? false                             ;; disable auto key propagation (on by default)
+ :on-trace (fn [entry] ...)}                        ;; callback after each cell completes
 ```
 
 ## Accumulating Data Model
