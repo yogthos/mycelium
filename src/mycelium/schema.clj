@@ -117,10 +117,7 @@
       {:data data}
       (let [coerced (m/decode schema data number-coercion-transformer)]
         (if-let [explanation (m/explain schema coerced)]
-          {:error {:cell-id (:id cell)
-                   :phase   :input
-                   :errors  (me/humanize explanation)
-                   :data    data}}
+          {:error (build-error-map (:id cell) :input explanation data)}
           {:data coerced})))))
 
 (defn coerce-output
@@ -140,10 +137,7 @@
          (if-let [schema (get output transition)]
            (let [coerced (m/decode schema data number-coercion-transformer)]
              (if-let [explanation (m/explain schema coerced)]
-               {:error {:cell-id (:id cell)
-                        :phase   :output
-                        :errors  (me/humanize explanation)
-                        :data    data}}
+               {:error (build-error-map (:id cell) :output explanation data)}
                {:data coerced}))
            {:data data})
          ;; No transition — try each schema, use first that matches after coercion
@@ -156,15 +150,12 @@
              {:error {:cell-id (:id cell)
                       :phase   :output
                       :errors  (str "Data does not match any output schema for " (:id cell))
-                      :data    data}})))
+                      :data    (strip-mycelium-keys data)}})))
 
        :else
        (let [coerced (m/decode output data number-coercion-transformer)]
          (if-let [explanation (m/explain output coerced)]
-           {:error {:cell-id (:id cell)
-                    :phase   :output
-                    :errors  (me/humanize explanation)
-                    :data    data}}
+           {:error (build-error-map (:id cell) :output explanation data)}
            {:data coerced}))))))
 
 (defn- compile-schema-value
