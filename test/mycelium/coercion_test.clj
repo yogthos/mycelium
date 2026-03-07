@@ -56,6 +56,17 @@
           result (schema/coerce-input cell {:x "not-a-number"})]
       (is (some? (:error result))))))
 
+(deftest coerce-input-rejects-fractional-double-to-int-test
+  (testing "coerce-input rejects fractional double when schema expects :int (no silent truncation)"
+    (defmethod cell/cell-spec :test/int-cell [_]
+      {:id      :test/int-cell
+       :handler (fn [_ data] data)
+       :schema  {:input  [:map [:x :int]]
+                 :output [:map [:x :int]]}})
+    (let [cell   (cell/get-cell! :test/int-cell)
+          result (schema/coerce-input cell {:x 949.5})]
+      (is (some? (:error result)) "949.5 should NOT silently truncate to 949"))))
+
 (deftest coerce-input-preserves-extra-keys-test
   (testing "coerce-input preserves keys not in the schema"
     (defmethod cell/cell-spec :test/int-cell [_]
