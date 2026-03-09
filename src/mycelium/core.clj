@@ -19,6 +19,11 @@
    See mycelium.cell/cell-spec."
   cell/cell-spec)
 
+(def defcell
+  "Registers a cell with less boilerplate. Eliminates ID duplication.
+   See mycelium.cell/defcell."
+  cell/defcell)
+
 ;; --- Workflow compilation ---
 
 (def compile-workflow
@@ -221,6 +226,11 @@
   "Walks a workflow and reports accumulated schema keys at each cell.
    See mycelium.dev/infer-workflow-schema."
   dev/infer-workflow-schema)
+
+(def generate-stubs
+  "Generates defcell stub code from a workflow definition.
+   See mycelium.dev/generate-stubs."
+  dev/generate-stubs)
 
 ;; --- Error inspection ---
 
