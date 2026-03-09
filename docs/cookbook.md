@@ -297,13 +297,12 @@ Graph-level timeouts **route** to a fallback cell. Resilience timeouts **error**
 ```clojure
 (require '[mycelium.cell :as cell])
 
-(defmethod cell/cell-spec :order/compute-tax [_]
-  {:id      :order/compute-tax
-   :handler (fn [resources data]
-              ;; With key propagation (default): return only new keys
-              {:tax (* (:subtotal data) (:tax-rate data))})
-   :schema  {:input  [:map [:subtotal :double] [:tax-rate :double]]
-             :output [:map [:tax :double]]}})
+(cell/defcell :order/compute-tax
+  {:input  [:map [:subtotal :double] [:tax-rate :double]]
+   :output [:map [:tax :double]]}
+  (fn [resources data]
+    ;; With key propagation (default): return only new keys
+    {:tax (* (:subtotal data) (:tax-rate data))}))
 ```
 
 Key propagation is on by default — handler output is merged with input, so you only return new or changed keys. To return all keys explicitly, disable with `{:propagate-keys? false}`.
@@ -311,27 +310,25 @@ Key propagation is on by default — handler output is merged with input, so you
 ### Async Cell
 
 ```clojure
-(defmethod cell/cell-spec :api/fetch [_]
-  {:id      :api/fetch
-   :async?  true
-   :handler (fn [resources data callback error-callback]
-              (http/get (:url data)
-                {:on-success (fn [resp] (callback {:response-body (:body resp)}))
-                 :on-error   (fn [err] (error-callback err))}))
-   :schema  {:input  [:map [:url :string]]
-             :output [:map [:response-body :string]]}})
+(cell/defcell :api/fetch
+  {:input  [:map [:url :string]]
+   :output [:map [:response-body :string]]
+   :async? true}
+  (fn [resources data callback error-callback]
+    (http/get (:url data)
+      {:on-success (fn [resp] (callback {:response-body (:body resp)}))
+       :on-error   (fn [err] (error-callback err))})))
 ```
 
 ### Parameterized Cell
 
 ```clojure
 ;; Register once, use with different params
-(defmethod cell/cell-spec :math/multiply [_]
-  {:id      :math/multiply
-   :handler (fn [_ data]
-              (let [factor (get-in data [:mycelium/params :factor])]
-                {:result (* (:value data) factor)}))
-   :schema  {:input [:map [:value number?]] :output [:map [:result number?]]}})
+(cell/defcell :math/multiply
+  {:input [:map [:value number?]] :output [:map [:result number?]]}
+  (fn [_ data]
+    (let [factor (get-in data [:mycelium/params :factor])]
+      {:result (* (:value data) factor)})))
 
 ;; Use in workflow
 {:cells {:triple {:id :math/multiply :params {:factor 3}}
@@ -596,6 +593,46 @@ Violations throw at compile time with the specific path that breaks the constrai
 ;; Generate DOT graph for visualization
 (dev/workflow->dot workflow-def)
 ```
+
+---
+
+## Scaffold a Workflow from Its Definition
+
+**Problem:** You've designed the workflow structure (cells, edges, schemas) and want to generate cell stubs to fill in.
+
+```clojure
+(require '[mycelium.dev :as dev])
+
+(def workflow
+  {:cells {:start   :order/validate
+           :process :order/compute
+           :render  :order/format}
+   :pipeline [:start :process :render]})
+
+;; Generate stubs
+(println (dev/generate-stubs workflow))
+```
+
+Output:
+
+```clojure
+(cell/defcell :order/compute
+  (fn [_resources data]
+    ;; TODO: implement :process
+    data))
+
+(cell/defcell :order/format
+  (fn [_resources data]
+    ;; TODO: implement :render
+    data))
+
+(cell/defcell :order/validate
+  (fn [_resources data]
+    ;; TODO: implement :start
+    data))
+```
+
+If cells are already registered with schemas, the stubs include their schemas. For manifest-style definitions (maps with `:id` and `:schema`), inline schemas are used.
 
 ---
 

@@ -371,6 +371,76 @@
         (recur)))
     @result))
 
+;; ===== Stub generation =====
+
+(defn- resolve-cell-info
+  "Resolves cell ID and schema from a workflow cell entry.
+   Handles both bare keyword (:app/id) and map ({:id :app/id :schema ...}) forms.
+   Falls back to registry lookup when schema not inline."
+  [cell-entry]
+  (let [cell-id (if (map? cell-entry) (:id cell-entry) cell-entry)
+        ;; Try inline schema first (manifest-style), then registry
+        inline-schema (when (map? cell-entry) (:schema cell-entry))
+        reg-cell (cell/get-cell cell-id)
+        schema (or inline-schema (:schema reg-cell))
+        doc (or (when (map? cell-entry) (:doc cell-entry)) (:doc reg-cell))
+        requires (or (when (map? cell-entry) (:requires cell-entry)) (:requires reg-cell))]
+    {:cell-id  cell-id
+     :schema   schema
+     :doc      doc
+     :requires requires}))
+
+(defn- format-schema-value
+  "Formats a schema value as a readable string."
+  [schema-val]
+  (if (map? schema-val)
+    ;; Per-transition output schema
+    (str "{" (str/join "\n                "
+                       (map (fn [[k v]] (str k " " (pr-str v)))
+                            (sort-by first schema-val))) "}")
+    (pr-str schema-val)))
+
+(defn generate-stubs
+  "Generates defcell stub code from a workflow definition.
+   For each cell, produces a defcell form with schema and a TODO handler.
+   Cells already registered get their schema from the registry.
+   Manifest-style cell entries (maps with :id and :schema) use inline schemas.
+
+   Returns a string of Clojure code.
+
+   Usage:
+     (println (dev/generate-stubs workflow-def))
+     (spit \"stubs.clj\" (dev/generate-stubs workflow-def))"
+  [{:keys [cells]}]
+  (str/join "\n\n"
+            (map (fn [[cell-name cell-entry]]
+                   (let [{:keys [cell-id schema doc requires]} (resolve-cell-info cell-entry)
+                         has-schema? (some? schema)
+                         input-schema (:input schema)
+                         output-schema (:output schema)
+                         opts-parts (cond-> []
+                                      input-schema
+                                      (conj (str " :input  " (pr-str input-schema)))
+                                      output-schema
+                                      (conj (str " :output " (format-schema-value output-schema)))
+                                      doc
+                                      (conj (str " :doc    " (pr-str doc)))
+                                      requires
+                                      (conj (str " :requires " (pr-str (vec requires)))))
+                         opts-str (when (seq opts-parts)
+                                    (str "\n  {" (str/join "\n   " opts-parts) "}"))
+                         handler-str (if requires
+                                       (str "(fn [{:keys ["
+                                            (str/join " " (map name requires))
+                                            "]} data]\n    ;; TODO: implement " cell-name
+                                            "\n    data)")
+                                       (str "(fn [_resources data]\n    ;; TODO: implement " cell-name
+                                            "\n    data)"))]
+                     (str "(cell/defcell " cell-id
+                          (or opts-str "")
+                          "\n  " handler-str ")")))
+                 (sort-by first cells))))
+
 (defn- format-trace-entry
   "Formats a single trace entry as a human-readable string."
   [idx entry]

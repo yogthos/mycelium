@@ -176,20 +176,44 @@ Key propagation is on by default — cells can return only new/changed keys and 
 
 ## Cell Registration
 
+### defcell (recommended)
+
 ```clojure
 (require '[mycelium.cell :as cell])
 
+;; Minimal — no schema
+(cell/defcell :namespace/cell-id
+  (fn [resources data] {:result "value"}))
+
+;; With schema
+(cell/defcell :namespace/cell-id
+  {:input  [:map [:key :type]]
+   :output [:map [:result :string]]}
+  (fn [resources data] {:result "value"}))
+
+;; With schema + options
+(cell/defcell :namespace/cell-id
+  {:input    [:map [:key :type]]
+   :output   [:map [:result :string]]
+   :doc      "..."
+   :requires [:db]
+   :async?   true}
+  (fn [resources data callback error-callback] ...))
+```
+
+`defcell` eliminates ID duplication — the cell-id is specified once. Schema, `:doc`, `:requires`, and `:async?` are passed in the opts map. The handler function is always the last argument.
+
+### defmethod (low-level)
+
+```clojure
 (defmethod cell/cell-spec :namespace/cell-id [_]
   {:id       :namespace/cell-id
-   :handler  (fn [resources data] (assoc data :result "value"))
+   :handler  (fn [resources data] {:result "value"})
    :schema   {:input  [:map [:key :type]]
               :output [:map [:result :string]]}
-   :requires [:db]         ;; optional — resource dependencies
-   :async?   true          ;; optional — async handler signature
-   :doc      "..."})       ;; optional
-
-;; Async handler signature (4-arity with callbacks):
-;; (fn [resources data callback error-callback] ...)
+   :requires [:db]
+   :async?   true
+   :doc      "..."})
 ```
 
 ### Cell Registry Helpers
@@ -734,7 +758,14 @@ Declare compile-time path invariants that are checked against all enumerated pat
 ;;     :step2  {:available-before #{:x :result}, :adds #{:total}, ...}}
 ```
 
-`analyze-workflow` and `infer-workflow-schema` are also available as `myc/analyze-workflow` and `myc/infer-workflow-schema`.
+```clojure
+;; Generate cell stubs from a workflow definition
+(dev/generate-stubs workflow-def)
+;; => prints defcell forms with schemas and TODO handlers
+;; Useful for scaffolding — fill in handler logic after generating
+```
+
+`analyze-workflow`, `infer-workflow-schema`, and `generate-stubs` are also available via `myc/`.
 
 ## Agent Orchestration
 

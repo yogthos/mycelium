@@ -74,3 +74,50 @@
   "Returns a seq of all registered cell IDs."
   []
   (keys (dissoc (methods cell-spec) :default)))
+
+(defn defcell
+  "Registers a cell with less boilerplate than the raw defmethod.
+   Eliminates ID duplication — the cell-id is specified once.
+
+   Arities:
+     (defcell :ns/id handler-fn)
+     (defcell :ns/id schema-map handler-fn)
+
+   schema-map is {:input [...] :output [...]} with optional :doc, :requires, :async?.
+   The :input/:output keys become the cell's :schema. Extra keys (:doc, :requires,
+   :async?) are lifted to the top-level spec.
+
+   Examples:
+     ;; Minimal — no schema
+     (defcell :order/compute-tax
+       (fn [resources data] {:tax (* (:subtotal data) 0.1)}))
+
+     ;; With schema
+     (defcell :order/compute-tax
+       {:input  [:map [:subtotal :double]]
+        :output [:map [:tax :double]]}
+       (fn [resources data] {:tax (* (:subtotal data) 0.1)}))
+
+     ;; With schema + opts
+     (defcell :order/compute-tax
+       {:input    [:map [:subtotal :double]]
+        :output   [:map [:tax :double]]
+        :doc      \"Computes tax\"
+        :requires [:tax-rates]}
+       (fn [resources data] {:tax (* (:subtotal data) 0.1)}))"
+  ([cell-id handler-fn]
+   (defcell cell-id nil handler-fn))
+  ([cell-id opts handler-fn]
+   (let [schema-keys #{:input :output}
+         opt-keys    #{:doc :requires :async?}
+         schema      (when opts
+                       (let [s (select-keys opts schema-keys)]
+                         (when (seq s) s)))
+         extra       (when opts (select-keys opts opt-keys))
+         spec        (cond-> {:id cell-id :handler handler-fn}
+                       schema (assoc :schema schema)
+                       (:doc extra) (assoc :doc (:doc extra))
+                       (:requires extra) (assoc :requires (:requires extra))
+                       (:async? extra) (assoc :async? (:async? extra)))]
+     (.addMethod cell-spec cell-id (constantly spec))
+     spec)))
