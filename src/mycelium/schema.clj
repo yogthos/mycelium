@@ -321,15 +321,18 @@
      `:coerce?`          — when true, coerces data before validation.
      `:state->names`     — map of state-id → cell-name keyword for error messages.
      `:input-transforms` — map of state-id → (fn [data] -> data), applied before validation.
+     `:validate`         — :strict (default), :warn, or :off.
    Skips terminal states."
   ([state->cell] (make-pre-interceptor state->cell {}))
   ([state->cell opts]
    (let [coerce?          (:coerce? opts)
          state->names     (:state->names opts)
-         input-transforms (:input-transforms opts)]
+         input-transforms (:input-transforms opts)
+         validate-mode    (or (:validate opts) :strict)]
      (fn [fsm-state _resources]
        (let [state-id (:current-state-id fsm-state)]
-         (if (contains? terminal-states state-id)
+         (if (or (contains? terminal-states state-id)
+                 (= :off validate-mode))
            fsm-state
            (if-let [cell (get state->cell state-id)]
              (let [;; Apply input transform before validation
@@ -339,20 +342,30 @@
                (if coerce?
                  (let [result (coerce-input cell (:data fsm-state))]
                    (if (:error result)
+                     (if (= :warn validate-mode)
+                       (let [warning (-> (:error result)
+                                         (attach-cell-path (:data fsm-state))
+                                         (attach-cell-name state-id state->names))]
+                         (update-in fsm-state [:data :mycelium/warnings] (fnil conj []) warning))
+                       (-> fsm-state
+                           (assoc :current-state-id ::fsm/error)
+                           (assoc-in [:data :mycelium/schema-error]
+                                     (-> (:error result)
+                                         (attach-cell-path (:data fsm-state))
+                                         (attach-cell-name state-id state->names)))))
+                     (assoc fsm-state :data (:data result))))
+                 (if-let [error (validate-input cell (:data fsm-state))]
+                   (if (= :warn validate-mode)
+                     (let [warning (-> error
+                                       (attach-cell-path (:data fsm-state))
+                                       (attach-cell-name state-id state->names))]
+                       (update-in fsm-state [:data :mycelium/warnings] (fnil conj []) warning))
                      (-> fsm-state
                          (assoc :current-state-id ::fsm/error)
                          (assoc-in [:data :mycelium/schema-error]
-                                   (-> (:error result)
+                                   (-> error
                                        (attach-cell-path (:data fsm-state))
-                                       (attach-cell-name state-id state->names))))
-                     (assoc fsm-state :data (:data result))))
-                 (if-let [error (validate-input cell (:data fsm-state))]
-                   (-> fsm-state
-                       (assoc :current-state-id ::fsm/error)
-                       (assoc-in [:data :mycelium/schema-error]
-                                 (-> error
-                                     (attach-cell-path (:data fsm-state))
-                                     (attach-cell-name state-id state->names))))
+                                       (attach-cell-name state-id state->names)))))
                    fsm-state)))
              fsm-state)))))))
 
@@ -367,13 +380,15 @@
    `opts` — optional map:
      `:coerce?`  — when true, coerces output data before validation.
      `:on-trace` — callback `(fn [trace-entry])` called after each cell completes.
+     `:validate` — :strict (default), :warn, or :off.
    Skips terminal states."
   ([state->cell state->edge-targets state->names]
    (make-post-interceptor state->cell state->edge-targets state->names {}))
   ([state->cell state->edge-targets state->names opts]
    (let [coerce?           (:coerce? opts)
          on-trace          (:on-trace opts)
-         output-transforms (:output-transforms opts)]
+         output-transforms (:output-transforms opts)
+         validate-mode     (or (:validate opts) :strict)]
      (fn [fsm-state _resources]
        (let [state-id (:last-state-id fsm-state)]
          (if (or (nil? state-id)
@@ -384,7 +399,8 @@
                                 (get-in state->edge-targets
                                         [state-id (:current-state-id fsm-state)]))
                    data       (:data fsm-state)
-                   skip-validation? (or (:mycelium/resilience-error data)
+                   skip-validation? (or (= :off validate-mode)
+                                        (:mycelium/resilience-error data)
                                         (:mycelium/timeout data)
                                         (:mycelium/error data))
                    ;; When coercing, get both error and coerced data
@@ -425,6 +441,16 @@
                                  error         (assoc :error error))]
                (when on-trace (on-trace trace-entry))
                (cond
+                 (and error (= :warn validate-mode))
+                 (let [warning (-> error
+                                   (attach-cell-path (:data fsm-state))
+                                   (attach-cell-name state-id state->names))]
+                   (-> fsm-state
+                       (assoc :data data)
+                       (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
+                       (update :data dissoc :mycelium/join-traces :mycelium/params)
+                       (update-in [:data :mycelium/warnings] (fnil conj []) warning)))
+
                  error
                  (-> fsm-state
                      (update-in [:data :mycelium/trace] (fnil conj []) trace-entry)
