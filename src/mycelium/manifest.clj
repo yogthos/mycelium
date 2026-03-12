@@ -135,12 +135,19 @@
      ;; Resolve :schema :inherit, then normalize lite syntax before validation
      (let [cells    (resolve-inherit-schemas cells)
            ;; Normalize cell schemas using edge context for output disambiguation
+           ;; Join members have no edge entries, so fall back to heuristic:
+           ;; a map output where all values are vectors is per-transition.
            cells    (into {}
                           (map (fn [[cell-name cell-def]]
                                  (if (or (= :inherit (:schema cell-def))
                                          (nil? (:schema cell-def)))
                                    [cell-name cell-def]
-                                   (let [dispatched? (map? (get edges cell-name))
+                                   (let [edge-def    (get edges cell-name)
+                                         output      (get-in cell-def [:schema :output])
+                                         dispatched? (or (map? edge-def)
+                                                         (and (map? output)
+                                                              (seq output)
+                                                              (every? vector? (vals output))))
                                          normalized  (schema/normalize-cell-schema
                                                        (:schema cell-def) dispatched?)]
                                      [cell-name (assoc cell-def :schema normalized)]))))
